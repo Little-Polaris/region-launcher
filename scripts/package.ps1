@@ -20,11 +20,11 @@ if (Test-Path -LiteralPath "$root/build/test-results/launcher.png") { Copy-Item 
 Push-Location $root
 try {
     $commit = git rev-parse HEAD
-    git archive --format=zip --output="$source/RegionLauncher-0.1.0-source.zip" HEAD
+    git archive --format=zip --output="$source/RegionLauncher-0.1.1-source.zip" HEAD
     if ($LASTEXITCODE) { throw 'Source archive failed' }
     Set-Content -LiteralPath "$docs/build-commit.txt" -Value $commit -Encoding utf8
 } finally { Pop-Location }
 $hashes = foreach ($file in $files) { $hash = Get-FileHash -LiteralPath (Join-Path $app $file) -Algorithm SHA256; "$($hash.Hash.ToLowerInvariant())  app/$file" }
 Set-Content -LiteralPath "$output/SHA256SUMS.txt" -Value $hashes -Encoding utf8
-Compress-Archive -LiteralPath $app,$docs,"$output/使用说明.md","$output/SHA256SUMS.txt" -DestinationPath "$packages/RegionLauncher-0.1.0-win-x64.zip" -Force
+Compress-Archive -LiteralPath $app,$docs,"$output/使用说明.md","$output/SHA256SUMS.txt" -DestinationPath "$packages/RegionLauncher-0.1.1-win-x64.zip" -Force
 Write-Output "Packaged: $output"

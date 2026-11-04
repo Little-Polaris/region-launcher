@@ -4,15 +4,22 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Win32;
 
-ApplicationConfiguration.Initialize();
-if (args.Length == 2 && args[0] == "--render-preview")
+static class Program
 {
-    using var preview = new Launcher(); preview.StartPosition = FormStartPosition.Manual;
-    preview.Location = new(-32000, -32000); preview.ShowInTaskbar = false; preview.Show(); Application.DoEvents();
-    using var bitmap = new Bitmap(preview.Width, preview.Height);
-    preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(args[1]); preview.Close(); return;
+    [STAThread]
+    static void Main(string[] args)
+    {
+        ApplicationConfiguration.Initialize();
+        if (args.Length == 2 && args[0] == "--render-preview")
+        {
+            using var preview = new Launcher(); preview.StartPosition = FormStartPosition.Manual;
+            preview.Location = new(-32000, -32000); preview.ShowInTaskbar = false; preview.Show(); Application.DoEvents();
+            using var bitmap = new Bitmap(preview.Width, preview.Height);
+            preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(args[1]); preview.Close(); return;
+        }
+        Application.Run(new Launcher());
+    }
 }
-Application.Run(new Launcher());
 
 sealed class Profile
 {
@@ -50,7 +57,7 @@ sealed class Launcher : Form
         grid.Controls.Add(notice, 0, 1); grid.SetColumnSpan(notice, 3);
         AddLabel(grid, "运行程序", 2); grid.Controls.Add(executable, 1, 2);
         var browse = new Button { Text = "选择…", AutoSize = true };
-        browse.Click += (_, _) => { using var d = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe" }; if (d.ShowDialog() == DialogResult.OK) executable.Text = d.FileName; };
+        browse.Click += (_, _) => { using var d = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe" }; if (d.ShowDialog(this) == DialogResult.OK) executable.Text = d.FileName; };
         grid.Controls.Add(browse, 2, 2);
         AddLabel(grid, "启动参数", 3); grid.Controls.Add(arguments, 1, 3); grid.SetColumnSpan(arguments, 2);
         AddLabel(grid, "本机代理", 4);
