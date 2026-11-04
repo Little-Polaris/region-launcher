@@ -17,12 +17,18 @@ static decltype(&GetUserDefaultLocaleName) realUserLocaleName = GetUserDefaultLo
 static decltype(&GetSystemDefaultLocaleName) realSystemLocaleName = GetSystemDefaultLocaleName;
 static decltype(&GetUserDefaultLCID) realUserLCID = GetUserDefaultLCID;
 static decltype(&GetSystemDefaultLCID) realSystemLCID = GetSystemDefaultLCID;
+static decltype(&GetThreadLocale) realThreadLCID = GetThreadLocale;
+static decltype(&GetThreadUILanguage) realThreadUI = GetThreadUILanguage;
+static decltype(&GetThreadPreferredUILanguages) realThreadLanguages = GetThreadPreferredUILanguages;
 static decltype(&GetUserDefaultLangID) realUserLang = GetUserDefaultLangID;
 static decltype(&GetSystemDefaultLangID) realSystemLang = GetSystemDefaultLangID;
 static decltype(&GetUserDefaultUILanguage) realUserUI = GetUserDefaultUILanguage;
 static decltype(&GetSystemDefaultUILanguage) realSystemUI = GetSystemDefaultUILanguage;
 static decltype(&GetTimeZoneInformation) realZone = GetTimeZoneInformation;
 static decltype(&GetDynamicTimeZoneInformation) realDynamicZone = GetDynamicTimeZoneInformation;
+static decltype(&SystemTimeToTzSpecificLocalTimeEx) realUtcToLocal = SystemTimeToTzSpecificLocalTimeEx;
+static decltype(&TzSpecificLocalTimeToSystemTimeEx) realLocalToUtc = TzSpecificLocalTimeToSystemTimeEx;
+static decltype(&GetTimeZoneInformationForYear) realYearZone = GetTimeZoneInformationForYear;
 static decltype(&GetLocalTime) realLocalTime = GetLocalTime;
 static decltype(&GetUserGeoID) realGeo = GetUserGeoID;
 static decltype(&GetUserDefaultGeoName) realGeoName = GetUserDefaultGeoName;
@@ -77,6 +83,24 @@ static DWORD season() {
     l.LowPart = lf.dwLowDateTime; l.HighPart = lf.dwHighDateTime;
     LONGLONG bias = ((LONGLONG)u.QuadPart - (LONGLONG)l.QuadPart) / 600000000LL;
     return bias == zone.Bias + zone.DaylightBias ? TIME_ZONE_ID_DAYLIGHT : TIME_ZONE_ID_STANDARD;
+}
+static bool fixedZone(const DYNAMIC_TIME_ZONE_INFORMATION* input) {
+    return zone.DynamicDaylightTimeDisabled && (!input || !_wcsicmp(input->TimeZoneKeyName, zone.TimeZoneKeyName));
+}
+static BOOL WINAPI utcToLocal(const DYNAMIC_TIME_ZONE_INFORMATION* input, const SYSTEMTIME* utc, LPSYSTEMTIME out) {
+    if (!fixedZone(input)) return realUtcToLocal(input ? input : &zone, utc, out);
+    TIME_ZONE_INFORMATION fixed = {}; fixed.Bias = zone.Bias; fixed.StandardBias = zone.StandardBias;
+    return SystemTimeToTzSpecificLocalTime(&fixed, utc, out);
+}
+static BOOL WINAPI localToUtc(const DYNAMIC_TIME_ZONE_INFORMATION* input, const SYSTEMTIME* local, LPSYSTEMTIME out) {
+    if (!fixedZone(input)) return realLocalToUtc(input ? input : &zone, local, out);
+    TIME_ZONE_INFORMATION fixed = {}; fixed.Bias = zone.Bias; fixed.StandardBias = zone.StandardBias;
+    return TzSpecificLocalTimeToSystemTime(&fixed, local, out);
+}
+static BOOL WINAPI yearZone(USHORT year, PDYNAMIC_TIME_ZONE_INFORMATION input, LPTIME_ZONE_INFORMATION out) {
+    BOOL result = realYearZone(year, input ? input : &zone, out);
+    if (result && fixedZone(input)) { out->DaylightDate = {}; out->StandardDate = {}; out->DaylightBias = 0; }
+    return result;
 }
 static DWORD WINAPI dynamicZone(PDYNAMIC_TIME_ZONE_INFORMATION out) {
     if (!out) { SetLastError(ERROR_INVALID_PARAMETER); return TIME_ZONE_ID_INVALID; }
@@ -135,10 +159,12 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 #define HOOK(old, replacement) if (DetourAttach(&(PVOID&)(old), replacement) != NO_ERROR) status = ERROR_INVALID_FUNCTION
     HOOK(realUserLocaleName, localeName); HOOK(realSystemLocaleName, localeName);
     HOOK(realUserLCID, getLCID); HOOK(realSystemLCID, getLCID);
+    HOOK(realThreadLCID, getLCID); HOOK(realThreadUI, getLang); HOOK(realThreadLanguages, uiLanguages);
     HOOK(realUserLang, getLang); HOOK(realSystemLang, getLang);
     HOOK(realUserUI, getLang); HOOK(realSystemUI, getLang);
     HOOK(realLocaleInfoEx, localeInfoEx); HOOK(realLocaleInfoW, localeInfoW); HOOK(realLocaleInfoA, localeInfoA);
     HOOK(realZone, timeZone); HOOK(realDynamicZone, dynamicZone); HOOK(realLocalTime, localTime);
+    HOOK(realUtcToLocal, utcToLocal); HOOK(realLocalToUtc, localToUtc); HOOK(realYearZone, yearZone);
     HOOK(realGeo, getGeo); HOOK(realGeoName, getGeoName);
     HOOK(realUserLanguages, uiLanguages); HOOK(realSystemLanguages, uiLanguages);
     HOOK(realCreateW, createW); HOOK(realCreateA, createA);

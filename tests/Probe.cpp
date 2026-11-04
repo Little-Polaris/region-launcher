@@ -16,22 +16,36 @@ int wmain(int argc, wchar_t** argv) {
     SYSTEMTIME winter = {2026, 1, 0, 15, 12, 0, 0, 0}, summer = {2026, 7, 0, 15, 12, 0, 0, 0};
     SYSTEMTIME wlocal = {}, slocal = {}; SystemTimeToTzSpecificLocalTimeEx(&tz, &winter, &wlocal); SystemTimeToTzSpecificLocalTimeEx(&tz, &summer, &slocal);
     wprintf(L"winterHour=%u summerHour=%u\n", wlocal.wHour, slocal.wHour);
+    SYSTEMTIME springBefore = {2026, 3, 0, 8, 9, 59, 0, 0}, springAfter = {2026, 3, 0, 8, 10, 0, 0, 0};
+    SYSTEMTIME fallBefore = {2026, 11, 0, 1, 8, 59, 0, 0}, fallAfter = {2026, 11, 0, 1, 9, 0, 0, 0};
+    SYSTEMTIME a, b, c, d; SystemTimeToTzSpecificLocalTimeEx(&tz, &springBefore, &a); SystemTimeToTzSpecificLocalTimeEx(&tz, &springAfter, &b);
+    SystemTimeToTzSpecificLocalTimeEx(&tz, &fallBefore, &c); SystemTimeToTzSpecificLocalTimeEx(&tz, &fallAfter, &d);
+    wprintf(L"spring=%u:%02u>%u:%02u fall=%u:%02u>%u:%02u\n", a.wHour, a.wMinute, b.wHour, b.wMinute, c.wHour, c.wMinute, d.wHour, d.wMinute);
     if (argc > 1 && !wcscmp(argv[1], L"--child")) return 0;
-    if (argc > 1 && !wcscmp(argv[1], L"--network") && argc >= 4) {
+    if (argc > 1 && !wcscmp(argv[1], L"--hold")) { fflush(stdout); Sleep(15000); return 0; }
+    if (argc > 1 && (!wcscmp(argv[1], L"--network") || !wcscmp(argv[1], L"--udp")) && argc >= 4) {
+        Sleep(1000);
         WSADATA data; WSAStartup(MAKEWORD(2, 2), &data);
-        SOCKET sock = socket(AF_INET, SOCK_STREAM, 0); DWORD timeout = 3000;
+        bool udp = !wcscmp(argv[1], L"--udp");
+        SOCKET sock = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0); DWORD timeout = 3000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
         sockaddr_in target = {}; target.sin_family = AF_INET; target.sin_port = htons((u_short)_wtoi(argv[3])); InetPtonW(AF_INET, argv[2], &target.sin_addr);
         int status = connect(sock, (sockaddr*)&target, sizeof(target));
-        if (status == 0) { send(sock, "probe", 5, 0); char reply[256] = {}; int n = recv(sock, reply, sizeof(reply)-1, 0); if (n > 0) printf("NETWORK=%s\n", reply); else printf("NETWORK_ERROR=%d\n", WSAGetLastError()); }
+        if (status == 0) { send(sock, "probe", 5, 0); char reply[256] = {}; int n = recv(sock, reply, sizeof(reply)-1, 0); if (n > 0) printf("NETWORK=%s\n", reply); else { printf("NETWORK_ERROR=%d\n", WSAGetLastError()); status = -1; } }
         else printf("CONNECT_ERROR=%d\n", WSAGetLastError());
-        closesocket(sock); WSACleanup(); return status == 0 ? 0 : 3;
+        closesocket(sock); WSACleanup();
+        if (argc >= 5) { int hold = _wtoi(argv[4]); if (hold > 0 && hold <= 5000) Sleep(hold); }
+        return status == 0 ? 0 : 3;
     }
     WCHAR self[32768]; GetModuleFileNameW(nullptr, self, _countof(self));
     std::wstring cmd = L"\"" + std::wstring(self) + L"\" --child";
+    if (argc >= 4 && !wcscmp(argv[1], L"--spawn-network")) {
+        cmd = L"\"" + std::wstring(self) + L"\" --network " + argv[2] + L" " + argv[3] + L" 2000";
+    }
     STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
     if (!CreateProcessW(self, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { printf("CHILD_ERROR=%lu\n", GetLastError()); return 1; }
-    WaitForSingleObject(pi.hProcess, 5000); CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    WaitForSingleObject(pi.hProcess, 10000); DWORD childExit = 0; GetExitCodeProcess(pi.hProcess, &childExit);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess); if (childExit) return (int)childExit;
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", nullptr, 0)) {
         WCHAR buffer[32768]; if (GetEnvironmentVariableW(L"REGION_PROBE_FILE", buffer, _countof(buffer))) {
             HANDLE f = CreateFileW(buffer, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
