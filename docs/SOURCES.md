@@ -1,5 +1,12 @@
 # Sources
 
+Mihomo independent executable: https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33
+Official archive: mihomo-windows-amd64-compatible-v1.19.33.zip.
+SHA-256: 7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d (verified against the official release asset digest).
+Unmodified executable, GPL-3.0; license included in app/proxy/LICENSE.
+Corresponding source: https://github.com/MetaCubeX/mihomo/tree/v1.19.33
+DNS forwarding documentation: https://wiki.metacubex.one/config/dns/
+
 ProxyBridge: https://github.com/InterceptSuite/ProxyBridge
 Commit: 2eb007671c82c972821e8e9bd404bc82499ebb4f. Windows core, MIT license.
 

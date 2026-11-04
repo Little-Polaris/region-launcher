@@ -4,3 +4,5 @@ obj/
 vendor/windivert/
 runtime/
 *.user
+__pycache__/
+data/

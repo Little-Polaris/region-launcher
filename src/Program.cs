@@ -41,6 +41,7 @@ sealed class Launcher : Form
     readonly Button start = new() { Text = "启动所选程序", AutoSize = true };
     readonly Button stop = new() { Text = "结束本次运行", Enabled = false, AutoSize = true };
     readonly string data = Path.Combine(AppContext.BaseDirectory, "data");
+    readonly DedicatedProxy dedicatedProxy = new();
     Process? session;
     string? currentJob;
     public Launcher()
@@ -75,7 +76,11 @@ sealed class Launcher : Form
         var browser = new Button { Text = "打开独立浏览器", AutoSize = true };
         browser.Click += async (_, _) => await OpenBrowser(); buttons.Controls.Add(browser);
         grid.Controls.Add(log, 0, 9); grid.SetColumnSpan(log, 3); Controls.Add(grid);
-        start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
+        start.Click += async (_, _) => {
+            if (Path.GetFileName(executable.Text.Trim()).ToLowerInvariant() is "chrome.exe" or "msedge.exe")
+                await OpenBrowser(executable.Text.Trim());
+            else await StartSession();
+        }; stop.Click += (_, _) => StopSession();
         FormClosing += (_, e) =>
         {
             if (session != null && e.CloseReason == CloseReason.UserClosing &&
@@ -83,14 +88,23 @@ sealed class Launcher : Form
             { e.Cancel = true; return; }
             StopSession();
         };
+        FormClosed += (_, _) => dedicatedProxy.Dispose();
+        dedicatedProxy.UnexpectedExit += () => { StopSession(); Append("独立代理已退出，正在结束本次运行；不会切回 7890。"); };
         Directory.CreateDirectory(data);
         try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); dst.Checked = p.AutoDst; } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
+        if (dedicatedProxy.Configured)
+        {
+            proxyHost.Text = "127.0.0.1"; proxyPort.Value = dedicatedProxy.Port;
+            proxyHost.Enabled = proxyPort.Enabled = false;
+            Append("专用全代理通道：全部目标经固定节点，网站 DNS 经节点内的加密解析；不使用 7890 的国内直连规则。");
+        }
         Append("默认配置：美国 / en-US / 洛杉矶 / 自动夏令时。尚未安装或登录 Claude。");
     }
     static void AddLabel(TableLayoutPanel grid, string text, int row) => grid.Controls.Add(new Label { Text = text, AutoSize = true, Padding = new(0, 6, 0, 0) }, 0, row);
     void Append(string text) { if (IsDisposed) return; if (InvokeRequired) { BeginInvoke(() => Append(text)); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}"); }
     async Task CheckProxy()
     {
+        if (dedicatedProxy.Configured) await dedicatedProxy.EnsureStarted();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var client = new TcpClient(); await client.ConnectAsync(proxyHost.Text.Trim(), (int)proxyPort.Value, cts.Token);
         var stream = client.GetStream(); await stream.WriteAsync(new byte[] { 5, 1, 0 }, cts.Token);
@@ -107,11 +121,11 @@ sealed class Launcher : Form
             }
         return null;
     }
-    async Task OpenBrowser()
+    async Task OpenBrowser(string? selectedPath = null)
     {
         try
         {
-            var path = FindBrowser() ?? throw new FileNotFoundException("未找到 Chrome 或 Edge，请先安装其中一个浏览器。");
+            var path = selectedPath ?? FindBrowser() ?? throw new FileNotFoundException("未找到 Chrome 或 Edge，请先安装其中一个浏览器。");
             if (!System.Net.IPAddress.TryParse(proxyHost.Text.Trim(), out var ip) || !System.Net.IPAddress.IsLoopback(ip))
                 throw new ArgumentException("独立浏览器入口目前使用本机代理，请填 127.0.0.1。");
             string browserData = Path.Combine(data, "browser", Path.GetFileNameWithoutExtension(path));
@@ -152,7 +166,7 @@ sealed class Launcher : Form
             await session.WaitForExitAsync(); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) { Append("未启动或运行失败：" + ex.Message); if (session is { HasExited: true }) { session.Dispose(); session = null; } }
-        finally { start.Enabled = session == null; stop.Enabled = session != null; proxyHost.Enabled = proxyPort.Enabled = dst.Enabled = session == null; }
+        finally { start.Enabled = session == null; stop.Enabled = session != null; dst.Enabled = session == null; proxyHost.Enabled = proxyPort.Enabled = session == null && !dedicatedProxy.Configured; }
     }
     void StopSession()
     {
