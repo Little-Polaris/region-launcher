@@ -46,3 +46,17 @@ after = outside_after.split(' locale=', 1)[1].split(' season=', 1)[0]
 assert before == after, (before, after)
 (OUT / 'outside.txt').write_text(outside_before + outside_after, encoding='utf-8')
 print('PASS: parent and child locale/region, automatic DST, fixed standard time, host file writes, unchanged host settings')
+
+# Independent Windows country, language and time-zone selections reach both generations.
+for locale, region, geo, zone, hours in [
+    ('de-DE', 'DE', 94, 'W. Europe Standard Time', 'winterHour=13 summerHour=14'),
+    ('ja-JP', 'JP', 122, 'Tokyo Standard Time', 'winterHour=21 summerHour=21'),
+    ('hi-IN', 'IN', 113, 'India Standard Time', 'winterHour=17 summerHour=17'),
+]:
+    config = OUT / f'locale-{region}.ini'
+    config.write_text(f'[session]\nJob=Local\\RegionLauncher.{uuid.uuid4().hex}\nApplication={BIN / "RegionProbe.exe"}\nLocale={locale}\nRegion={region}\nGeo={geo}\nTimeZone={zone}\nAutoDst=1\n', encoding='utf-16')
+    output = execute([BIN / 'RegionSession.exe', '--locale-test', config])
+    assert output.count(f'locale={locale} region={region} geo={geo} timezone={zone}') == 2, output
+    assert output.count(hours) == 2, output
+    (OUT / f'locale-{region}.txt').write_text(output, encoding='utf8')
+print('PASS: Germany/German, Japan/Japanese and India/Hindi Windows choices reach parent and child')

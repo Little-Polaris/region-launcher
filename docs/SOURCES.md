@@ -28,3 +28,13 @@ SHA-256: 63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15.
 Corresponding source: https://github.com/basil00/WinDivert/tree/v2.2.2
 
 The launcher and its modifications are experimental. Upstream compatibility claims do not constitute validation of this launcher or of Claude Desktop.
+
+
+## Windows 后台服务与参数枚举
+
+- Service entry point: https://learn.microsoft.com/en-us/windows/win32/services/service-entry-point
+- Service security: https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights
+- Explicit handle inheritance: https://learn.microsoft.com/en-us/windows/win32/procthread/creating-processes
+- Windows ICU mapping: https://devblogs.microsoft.com/oldnewthing/?p=105255
+- Windows geographical information: https://learn.microsoft.com/en-us/windows/win32/api/winnls/ne-winnls-sysgeotype
+- Google 官方 Chrome for Testing: https://googlechromelabs.github.io/chrome-for-testing/ 。本轮测试工具为 157.0.8103.38/win64，归档 SHA256 AE0DEEF27D449E1D7529DF7705D609BAB102DE48464DA13567ED3DD2EE1A0586；文件未带 Authenticode 签名，来自官方 HTTPS 下载地址。仅作为独立测试浏览器，不包含在源码包。

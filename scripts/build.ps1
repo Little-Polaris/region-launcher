@@ -31,7 +31,8 @@ try {
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours",(Join-Path $root 'src/RegionHook.cpp'),(Join-Path $root 'src/UnifiedDns.cpp'),'/LD','/link','detours.lib','advapi32.lib','dnsapi.lib','ws2_32.lib','iphlpapi.lib',"/DEF:$(Join-Path $root 'src/RegionHook.def')",'/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionHook.dll")
     $sources = Get-ChildItem -LiteralPath $pb -Filter '*.c' | ForEach-Object FullName
     RunCompiler (@('/nologo','/O2','/MT','/utf-8','/DPROXYBRIDGE_EXPORTS','/D_CRT_SECURE_NO_WARNINGS','/D_WINSOCK_DEPRECATED_NO_WARNINGS',"/I$wd/include") + $sources + @('/LD','/link',"/LIBPATH:$wd/x64",'WinDivert.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/ProxyBridgeCore.dll"))
-    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours", "/I$pb",(Join-Path $root 'src/Session.cpp'),'/link','detours.lib','shell32.lib','ws2_32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionSession.exe")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours", "/I$pb",(Join-Path $root 'src/Session.cpp'),'/link','detours.lib','shell32.lib','ws2_32.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionSession.exe")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$pb",(Join-Path $root 'src/NetworkService.cpp'),'/link','advapi32.lib','ws2_32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionNetworkService.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/Probe.cpp'),'/link','ws2_32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionProbe.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/DnsProbe.cpp'),'/link','ws2_32.lib','dnsapi.lib','iphlpapi.lib',"/OUT:$bin/DnsProbe.exe")
     foreach ($file in @('WinDivert.dll','WinDivert64.sys')) {

@@ -242,11 +242,6 @@ DWORD WINAPI packet_processor(LPVOID arg)
                         goto ipv6u_send;
                     }
 
-                    if (is_ipv6_multicast_or_linklocal((const UINT8*)ipv6_header->DstAddr))
-                    {
-                        WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
-                        continue;
-                    }
 
                     if (!g_has_active_rules && g_connection_callback == NULL)
                     {
@@ -264,6 +259,9 @@ DWORD WINAPI packet_processor(LPVOID arg)
                     DWORD pid6u = 0;
                     UINT32 pcid6u = 0;
                     action6u = check_process_rule_v6((const UINT8*)ipv6_header->SrcAddr, sp, (const UINT8*)ipv6_header->DstAddr, dp, TRUE, &pid6u, &pcid6u);
+                    // A selected application's IPv6 block also covers link-local and multicast.
+                    if (action6u != RULE_ACTION_BLOCK && is_ipv6_multicast_or_linklocal((const UINT8*)ipv6_header->DstAddr))
+                        action6u = RULE_ACTION_DIRECT;
                     if (action6u == RULE_ACTION_DIRECT && pid6u > 0)
                         udp_direct_remember(TRUE, ipv6_header->DstAddr, sp, dp);
 
@@ -446,12 +444,6 @@ DWORD WINAPI packet_processor(LPVOID arg)
                     continue;
                 }
 
-                // skip multicast/link-local
-                if (is_ipv6_multicast_or_linklocal((const UINT8*)ipv6_header->DstAddr))
-                {
-                    WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
-                    continue;
-                }
 
                 if (!g_has_active_rules && g_connection_callback == NULL)
                 {
@@ -463,6 +455,9 @@ DWORD WINAPI packet_processor(LPVOID arg)
                 DWORD pid6 = 0;
                 UINT32 proxy_config_id6 = 0;
                 action6 = check_process_rule_v6((const UINT8*)ipv6_header->SrcAddr, sp, (const UINT8*)ipv6_header->DstAddr, dp, FALSE, &pid6, &proxy_config_id6);
+                // A selected application's IPv6 block also covers link-local and multicast.
+                if (action6 != RULE_ACTION_BLOCK && is_ipv6_multicast_or_linklocal((const UINT8*)ipv6_header->DstAddr))
+                    action6 = RULE_ACTION_DIRECT;
 
                 // ::1 IPv6 loopback - same per-rule "localhost via proxy" flag as IPv4 127.
                 if (action6 == RULE_ACTION_PROXY && !g_tl_rule_localhost)

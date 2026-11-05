@@ -33,6 +33,12 @@ static void rawDns(const wchar_t* name, bool tcp, bool ipv6 = false) {
     DWORD timeout = 3500; setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
     sockaddr_in target = {}; target.sin_family = AF_INET; target.sin_port = htons(53); InetPtonW(AF_INET, L"127.0.0.2", &target.sin_addr);
     sockaddr_in6 target6 = {}; target6.sin6_family = AF_INET6; target6.sin6_port = htons(53); InetPtonW(AF_INET6, L"::1", &target6.sin6_addr);
+    WCHAR testTarget[128] = {};
+    if (ipv6 && GetEnvironmentVariableW(L"DNS_PROBE_IPV6_TARGET", testTarget, _countof(testTarget))) {
+        WCHAR* scope = wcschr(testTarget, L'%');
+        if (scope) { *scope++ = 0; target6.sin6_scope_id = wcstoul(scope, nullptr, 10); }
+        if (InetPtonW(AF_INET6, testTarget, &target6.sin6_addr) != 1) { closesocket(s); puts("Invalid IPv6 fixture address"); return; }
+    }
     u_long mode = 1; if (tcp) ioctlsocket(s, FIONBIO, &mode);
     bool ok = connect(s, ipv6 ? (sockaddr*)&target6 : (sockaddr*)&target, ipv6 ? sizeof(target6) : sizeof(target)) == 0;
     if (!ok && tcp && WSAGetLastError() == WSAEWOULDBLOCK) {
@@ -48,7 +54,9 @@ static void rawDns(const wchar_t* name, bool tcp, bool ipv6 = false) {
     char reply[4096]; int n = 0;
     if (ok && tcp) { unsigned short size; ok = readAll(s, (char*)&size, 2); if (ok) { n = ntohs(size); ok = n <= sizeof(reply) && readAll(s, reply, n); } }
     else if (ok) { n = recv(s, reply, sizeof(reply), 0); ok = n >= 12; }
-    printf("RawDNS-%s-v%d status=%d", tcp ? "TCP" : "UDP", ipv6 ? 6 : 4, ok ? 0 : WSAGetLastError());
+    int result = ok ? 0 : WSAGetLastError();
+    if (!ok && !result) result = WSAECONNABORTED; // Later socket calls may clear the failed operation's last error.
+    printf("RawDNS-%s-v%d status=%d", tcp ? "TCP" : "UDP", ipv6 ? 6 : 4, result);
     if (ok && n >= 16) { char ip[64]; InetNtopA(AF_INET, reply+n-4, ip, sizeof(ip)); printf(" ip=%s", ip); }
     puts(""); closesocket(s);
 }

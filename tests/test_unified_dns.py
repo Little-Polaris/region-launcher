@@ -69,8 +69,8 @@ class TCP6(socketserver.ThreadingTCPServer):
     address_family = socket.AF_INET6
 
 
-def outside(label):
-    p = subprocess.run([str(BIN/'DnsProbe.exe'), domain, 'leaf'] + (['raw'] if full_network else []), capture_output=True, text=True, timeout=45)
+def outside(label, env=None):
+    p = subprocess.run([str(BIN/'DnsProbe.exe'), domain, 'leaf'] + (['raw'] if full_network else []), capture_output=True, text=True, timeout=45, env=env)
     (OUT/(label+'.txt')).write_text(p.stdout+p.stderr, encoding='utf8')
     assert p.returncode == 0, p
     assert 'servers=0' in p.stdout and '203.0.113.77' not in p.stdout, p.stdout
@@ -131,6 +131,25 @@ AutoDst=1
         assert driver.returncode == 0 and driver.stdout.count('ip=203.0.113.77') == 2 and '203.0.113.88' not in driver.stdout, driver.stdout
         assert 'RawDNS-UDP-v6 status=0' not in driver.stdout and 'RawDNS-TCP-v6 status=0' not in driver.stdout, driver.stdout
         print('PASS: packet engine independently blocks inside IPv6 TCP/UDP with no injected hooks')
+        addresses = json.loads(subprocess.check_output(['powershell.exe','-NoProfile','-Command',
+            "@(Get-NetIPAddress -AddressFamily IPv6 | Where-Object {$_.IPAddress -like 'fe80:*' -and $_.AddressState -eq 'Preferred'} | Select-Object IPAddress,InterfaceIndex) | ConvertTo-Json -Compress"],text=True))
+        if isinstance(addresses, dict): addresses = [addresses]
+        assert addresses, 'This host acceptance run requires a usable link-local IPv6 address'
+        link = addresses[0]; address = link['IPAddress'].split('%')[0]; scope = link['InterfaceIndex']
+        for server_class, handler in [(UDP6,DNS),(TCP6,TCPDNS)]:
+            server = stack.enter_context(server_class((address,53,0,scope),handler))
+            threading.Thread(target=server.serve_forever,daemon=True).start(); stack.callback(server.shutdown)
+        env = os.environ.copy(); env['DNS_PROBE_IPV6_TARGET'] = f'{address}%{scope}'
+        outside('outside-linklocal',env)
+        before_link = sum(item[0] == address for item in seen)
+        assert before_link >= 2
+        driver_cfg.write_text(driver_cfg.read_text(encoding='utf-16').replace(next(line for line in lines if line.startswith('Job=')),f'Job=Local\\RegionLauncher.{uuid.uuid4().hex}'),encoding='utf-16')
+        link_result = subprocess.run([str(BIN/'RegionSession.exe'),'--network-test',str(driver_cfg)],capture_output=True,text=True,timeout=45,env=env)
+        (OUT/'driver-linklocal.txt').write_text(link_result.stdout+link_result.stderr,encoding='utf8')
+        assert link_result.returncode == 0 and link_result.stdout.count('ip=203.0.113.77') == 2, link_result.stdout+link_result.stderr
+        assert 'RawDNS-UDP-v6 status=0' not in link_result.stdout and 'RawDNS-TCP-v6 status=0' not in link_result.stdout, link_result.stdout
+        assert sum(item[0] == address for item in seen) == before_link, 'Selected process sent data to the IPv6 link-local server'
+        print('PASS: IPv6 link-local TCP/UDP blocked inside with no hooks; outside same endpoints work')
     if '--failure' in sys.argv:
         domain = 'www.example.com'
         baseline = subprocess.run([str(BIN/'DnsProbe.exe'),domain],capture_output=True,text=True,timeout=45)

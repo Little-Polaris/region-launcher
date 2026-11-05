@@ -7,10 +7,9 @@
 #include <string>
 #include <vector>
 #include "detours.h"
-#include "ProxyBridge.h"
+#include "NetworkProtocol.h"
 
 static HANDLE sessionJob;
-static FILE* brokerLog;
 static std::wstring cfg;
 static std::wstring get(const WCHAR* key, const WCHAR* fallback = L"") {
     WCHAR value[32768]; GetPrivateProfileStringW(L"session", key, fallback, value, _countof(value), cfg.c_str()); return value;
@@ -31,16 +30,6 @@ static std::string utf8(const std::wstring& value) {
 static std::wstring directory() {
     WCHAR path[32768]; GetModuleFileNameW(nullptr, path, _countof(path)); std::wstring s(path); return s.substr(0, s.find_last_of(L"\\"));
 }
-static void logLine(const char* text) { if (brokerLog) { fprintf(brokerLog, "%s\n", text); fflush(brokerLog); } }
-static BOOL belongs(DWORD pid) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process) return FALSE;
-    BOOL inJob = FALSE; IsProcessInJob(process, sessionJob, &inJob); CloseHandle(process); return inJob;
-}
-static void connection(const char* name, DWORD pid, const char* host, UINT16 port, const char* info) {
-    if (!belongs(pid)) return;
-    char line[2048]; snprintf(line, sizeof(line), "PID=%lu %s %s:%u %s", pid, name, host, port, info); logLine(line);
-}
 static int error(const WCHAR* what) {
     DWORD code = GetLastError();
     fwprintf(stderr, L"%s (Windows error %lu)\n", what, code); fflush(stderr);
@@ -48,47 +37,39 @@ static int error(const WCHAR* what) {
     if (f) { fwprintf(f, L"PID=%lu %s (Windows error %lu)\n", GetCurrentProcessId(), what, code); fclose(f); }
     return 1;
 }
-static int broker(DWORD parent) {
-    auto name = get(L"Job");
-    if (name.rfind(L"Local\\RegionLauncher.", 0) != 0) { SetLastError(ERROR_INVALID_DATA); return error(L"Invalid job identifier in configuration"); }
-    HANDLE singleton = CreateMutexW(nullptr, TRUE, L"Local\\RegionLauncher.NetworkEngine");
-    if (!singleton || GetLastError() == ERROR_ALREADY_EXISTS) return error(L"Another launcher network session is running");
-    sessionJob = OpenJobObjectW(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, FALSE, name.c_str());
-    HANDLE parentHandle = OpenProcess(SYNCHRONIZE, FALSE, parent);
-    HANDLE ready = OpenEventW(EVENT_MODIFY_STATE, FALSE, (name + L".ready").c_str());
-    HANDLE stop = OpenEventW(SYNCHRONIZE, FALSE, (name + L".stop").c_str());
-    if (!sessionJob || !parentHandle || !ready || !stop) return error(L"Cannot open session controls");
-    _wfopen_s(&brokerLog, (cfg + L".network.log").c_str(), L"wb");
-    HMODULE core = LoadLibraryW((directory() + L"\\ProxyBridgeCore.dll").c_str());
-    if (!core) return error(L"Cannot load proxy engine");
-#define IMPORT(fn) auto fn = reinterpret_cast<decltype(&::fn)>(GetProcAddress(core, #fn)); if (!fn) return error(L"Missing proxy engine export")
-    IMPORT(ProxyBridge_SetProcessScope); IMPORT(ProxyBridge_SetLogCallback); IMPORT(ProxyBridge_SetConnectionCallback);
-    IMPORT(ProxyBridge_SetTrafficLoggingEnabled); IMPORT(ProxyBridge_AddProxyConfig); IMPORT(ProxyBridge_AddRule);
-    IMPORT(ProxyBridge_Start); IMPORT(ProxyBridge_Stop);
-    IMPORT(ProxyBridge_SetDnsResolver);
-#undef IMPORT
-    ProxyBridge_SetProcessScope(belongs); ProxyBridge_SetLogCallback(logLine); ProxyBridge_SetConnectionCallback(connection);
-    ProxyBridge_SetTrafficLoggingEnabled(TRUE);
-    auto host = utf8(get(L"ProxyHost", L"127.0.0.1")); int port = _wtoi(get(L"ProxyPort", L"7890").c_str());
-    if (port < 1 || port > 65535) return 2;
-    auto id = ProxyBridge_AddProxyConfig(PROXY_TYPE_SOCKS5, host.c_str(), (UINT16)port, "", "", FALSE);
-    BOOL proxyLoopback = get(L"ProxyLoopback", L"0") == L"1";
-    if (!ProxyBridge_AddRule("*", "::/0", "*", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_BLOCK, 0, TRUE))
-        return error(L"IPv6 block rule could not be installed");
-    auto dns = utf8(get(L"DnsAddress"));
-    if (!get(L"DnsAddress").empty() &&
-        (!ProxyBridge_SetDnsResolver(dns.c_str()) ||
-         !ProxyBridge_AddRule("*", "*", "53", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_PROXY, id, TRUE)))
-        return error(L"Private DNS configuration rejected");
-    if (!id || !ProxyBridge_AddRule("*", "*", "*", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_PROXY, id, proxyLoopback)) return error(L"Proxy configuration rejected");
-    if (!ProxyBridge_Start()) return error(L"Proxy driver could not start; see network log");
-    SetEvent(ready);
-    HANDLE waits[] = {parentHandle, stop}; WaitForMultipleObjects(2, waits, FALSE, INFINITE);
-    // Stop the owned applications before removing their network route.
-    TerminateJobObject(sessionJob, 1);
-    ProxyBridge_Stop(); if (brokerLog) fclose(brokerLog);
-    CloseHandle(sessionJob); CloseHandle(parentHandle); CloseHandle(ready); CloseHandle(stop); CloseHandle(singleton);
-    return 0;
+static HANDLE requestNetwork(HANDLE ready, HANDLE stop) {
+    NetworkRequest request;
+    if (get(L"ProxyHost", L"127.0.0.1") != L"127.0.0.1") { SetLastError(ERROR_INVALID_PARAMETER); return nullptr; }
+    request.port = wcstoul(get(L"ProxyPort", L"7890").c_str(), nullptr, 10);
+    request.proxyLoopback = get(L"ProxyLoopback", L"0") == L"1";
+    request.job = (uintptr_t)sessionJob; request.ready = (uintptr_t)ready; request.stop = (uintptr_t)stop;
+    auto dns = get(L"DnsAddress"); IN_ADDR address = {};
+    if (!dns.empty()) {
+        if (InetPtonW(AF_INET, dns.c_str(), &address) != 1) { SetLastError(ERROR_INVALID_PARAMETER); return nullptr; }
+        request.dns = address.S_un.S_addr;
+    }
+    if (!WaitNamedPipeW(PipeName, 5000)) return nullptr;
+    HANDLE pipe = CreateFileW(PipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IMPERSONATION, nullptr);
+    if (pipe == INVALID_HANDLE_VALUE) return nullptr;
+    // Verify the pipe belongs to the installed service, before sending process handles.
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE service = manager ? OpenServiceW(manager, ServiceName, SERVICE_QUERY_STATUS) : nullptr;
+    SERVICE_STATUS_PROCESS status = {}; DWORD bytes = 0; ULONG server = 0;
+    bool trusted = service && QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (BYTE*)&status, sizeof(status), &bytes) &&
+        status.dwCurrentState == SERVICE_RUNNING && GetNamedPipeServerProcessId(pipe, &server) && server == status.dwProcessId;
+    if (service) CloseServiceHandle(service); if (manager) CloseServiceHandle(manager);
+    NetworkReply reply;
+    bool ok = trusted && PipeIO(pipe, &request, sizeof(request), true) && PipeIO(pipe, &reply, sizeof(reply), false);
+    DWORD err = trusted ? GetLastError() : ERROR_ACCESS_DENIED;
+    BYTE ack = 1;
+    if (ok) PipeIO(pipe, &ack, 1, true);
+    CloseHandle(pipe);
+    if (!ok) { SetLastError(err); return nullptr; }
+    if (reply.version != ProtocolVersion || reply.error || !reply.worker) {
+        SetLastError(reply.error ? reply.error : ERROR_INVALID_DATA); return nullptr;
+    }
+    return (HANDLE)(uintptr_t)reply.worker;
 }
 static bool x64Image(const std::wstring& path) {
     FILE* f = nullptr; if (_wfopen_s(&f, path.c_str(), L"rb") || !f) return false;
@@ -98,8 +79,47 @@ static bool x64Image(const std::wstring& path) {
         fread(&header, sizeof(header), 1, f) == 1 && signature == IMAGE_NT_SIGNATURE && header.Machine == IMAGE_FILE_MACHINE_AMD64;
     fclose(f); return valid;
 }
+static bool configureEnvironment() {
+    auto selectedLocale = get(L"Locale", L"en-US"), selectedRegion = get(L"Region", L"US");
+    auto selectedZone = get(L"TimeZone", L"Pacific Standard Time"), geoText = get(L"Geo", L"244");
+    auto automatic = get(L"AutoDst", L"1"); WCHAR iso[16] = {};
+    DYNAMIC_TIME_ZONE_INFORMATION zone = {}; bool found = false;
+    for (DWORD i = 0; EnumDynamicTimeZoneInformation(i, &zone) == ERROR_SUCCESS; ++i) {
+        if (!_wcsicmp(zone.TimeZoneKeyName, selectedZone.c_str())) { found = true; break; }
+    }
+    if (!found || !IsValidLocaleName(selectedLocale.c_str()) || (automatic != L"0" && automatic != L"1") ||
+        !GetGeoInfoW(_wtoi(geoText.c_str()), GEO_ISO2, iso, _countof(iso), 0) || _wcsicmp(iso, selectedRegion.c_str())) {
+        SetLastError(ERROR_INVALID_PARAMETER); return false;
+    }
+    WCHAR tz[128] = {};
+    if (automatic == L"1") {
+        HMODULE icu = LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        using MapZone = int32_t (__cdecl*)(const WCHAR*, int32_t, const char*, WCHAR*, int32_t, int32_t*);
+        auto map = icu ? reinterpret_cast<MapZone>(GetProcAddress(icu, "ucal_getTimeZoneIDForWindowsID")) : nullptr;
+        int32_t status = 0;
+        bool mapped = map && map(selectedZone.c_str(), -1, utf8(selectedRegion).c_str(), tz, _countof(tz), &status) > 0 && status <= 0;
+        if (icu) FreeLibrary(icu);
+        if (!mapped) { SetLastError(ERROR_INVALID_DATA); return false; }
+    } else {
+        LONG bias = zone.Bias + zone.StandardBias;
+        if (bias % 60 == 0) swprintf_s(tz, L"Etc/GMT%+ld", bias / 60);
+        else swprintf_s(tz, L"GMT%c%02ld:%02ld", bias > 0 ? L'-' : L'+', labs(bias)/60, labs(bias)%60);
+    }
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", selectedLocale.c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_TIMEZONE", selectedZone.c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_REGION", selectedRegion.c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_GEO", geoText.c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_DST", automatic.c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", get(L"DnsAddress").empty() ? nullptr : get(L"DnsAddress").c_str());
+    SetEnvironmentVariableW(L"TZ", tz);
+    for (WCHAR& c : selectedLocale) if (c == L'-') c = L'_';
+    selectedLocale += L".UTF-8";
+    SetEnvironmentVariableW(L"LANG", selectedLocale.c_str()); SetEnvironmentVariableW(L"LC_ALL", selectedLocale.c_str());
+    return true;
+}
 static int run(bool localeOnly, bool joining = false, bool inject = true) {
     auto app = get(L"Application"); if (!x64Image(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"This build requires an x64 Windows executable"); }
+    if (!configureEnvironment()) return error(L"Invalid Windows country, language or time zone settings");
     DWORD ownerPid = wcstoul(get(L"OwnerPid", L"0").c_str(), nullptr, 10);
     HANDLE owner = ownerPid ? OpenProcess(SYNCHRONIZE, FALSE, ownerPid) : nullptr;
     if (ownerPid && !owner) return error(L"Launcher is no longer running");
@@ -114,22 +134,12 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
     auto requestStop = [&]() { if (!joining) SetEvent(stop); };
     HANDLE engine = nullptr;
     if (!localeOnly && !joining) {
-        WCHAR self[32768]; GetModuleFileNameW(nullptr, self, _countof(self));
-        auto params = L"--broker " + quote(cfg) + L" " + std::to_wstring(GetCurrentProcessId());
-        SHELLEXECUTEINFOW sei = {sizeof(sei)}; sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC; sei.lpVerb = L"runas";
-        sei.lpFile = self; sei.lpParameters = params.c_str(); sei.nShow = SW_HIDE;
-        if (!ShellExecuteExW(&sei)) return error(L"Network engine elevation was cancelled or failed");
-        engine = sei.hProcess; HANDLE waits[] = {ready, engine, owner};
-        if (WaitForMultipleObjects(owner ? 3 : 2, waits, FALSE, 30000) != WAIT_OBJECT_0) { requestStop(); return error(L"Network engine not ready or launcher closed; application was not started"); }
+        engine = requestNetwork(ready, stop);
+        if (!engine) return error(L"Network service unavailable or request rejected; install/start RegionLauncherNetwork first (application was not started)");
+        HANDLE waits[] = {ready, engine, owner};
+        DWORD wait = WaitForMultipleObjects(owner ? 3 : 2, waits, FALSE, 30000);
+        if (wait != WAIT_OBJECT_0) { requestStop(); SetLastError(wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : ERROR_NOT_READY); return error(L"Network engine not ready or launcher closed; application was not started. See the installed service logs/network.log"); }
     }
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", get(L"Locale", L"en-US").c_str());
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_TIMEZONE", get(L"TimeZone", L"Pacific Standard Time").c_str());
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_REGION", get(L"Region", L"US").c_str());
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_GEO", get(L"Geo", L"244").c_str());
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_DST", get(L"AutoDst", L"1").c_str());
-    SetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", get(L"DnsAddress").empty() ? nullptr : get(L"DnsAddress").c_str());
-    SetEnvironmentVariableW(L"TZ", get(L"AutoDst", L"1") == L"1" ? L"America/Los_Angeles" : L"Etc/GMT+8");
-    SetEnvironmentVariableW(L"LANG", L"en_US.UTF-8");
     auto dll = utf8(directory() + L"\\RegionHook.dll");
     // Detours uses ANSI paths for its import; require an ASCII deployment path for a predictable import.
     for (unsigned char c : dll) if (c >= 128) { requestStop(); SetLastError(ERROR_INVALID_NAME); return error(L"Move launcher to a path containing only English characters"); }
@@ -175,9 +185,8 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
 }
 int wmain(int argc, wchar_t** argv) {
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (argc < 3) { fwprintf(stderr, L"Usage: RegionSession --run|--locale-test|--broker session.ini [parentPID]\n"); return 2; }
+    if (argc < 3) { fwprintf(stderr, L"Usage: RegionSession --run|--locale-test session.ini\n"); return 2; }
     WCHAR full[32768]; if (!GetFullPathNameW(argv[2], _countof(full), full, nullptr)) return 2; cfg = full;
-    if (!_wcsicmp(argv[1], L"--broker") && argc == 4) return broker(wcstoul(argv[3], nullptr, 10));
     if (!_wcsicmp(argv[1], L"--run")) return run(false);
     if (!_wcsicmp(argv[1], L"--join")) return run(false, true);
     if (!_wcsicmp(argv[1], L"--locale-test")) return run(true);
