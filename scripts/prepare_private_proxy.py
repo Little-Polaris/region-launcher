@@ -22,7 +22,7 @@ def make_config(node, port=17890):
         'external-controller': '', 'tun': {'enable': False},
         'profile': {'store-selected': False, 'store-fake-ip': False},
         'dns': {
-            'enable': True, 'ipv6': False, 'enhanced-mode': 'redir-host',
+            'enable': True, 'listen': '127.0.0.153:53', 'ipv6': False, 'enhanced-mode': 'redir-host',
             'use-hosts': False, 'use-system-hosts': False, 'respect-rules': True,
             'default-nameserver': ['1.1.1.1'],
             'proxy-server-nameserver': ['https://1.1.1.1/dns-query'],

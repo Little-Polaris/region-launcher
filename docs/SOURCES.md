@@ -1,5 +1,14 @@
 # Sources
 
+Windows DNS API contracts used by the unified prototype:
+https://learn.microsoft.com/en-us/windows/win32/api/windns/nf-windns-dnsqueryex
+https://learn.microsoft.com/en-us/windows/win32/api/windns/ns-windns-dns_query_request
+https://learn.microsoft.com/en-us/windows/win32/api/windns/ns-windns-dns_query_request3
+https://learn.microsoft.com/en-us/windows/win32/api/windns/nf-windns-dnsqueryraw
+https://learn.microsoft.com/en-us/windows/win32/api/windns/ns-windns-dns_query_raw_request
+Reference for DNS_ADDR_ARRAY construction and asynchronous completion lifetime:
+https://github.com/microsoft/Windows-classic-samples/blob/main/Samples/DNSAsyncQuery/cpp/DnsQueryEx.cpp
+
 Mihomo independent executable: https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33
 Official archive: mihomo-windows-amd64-compatible-v1.19.33.zip.
 SHA-256: 7aaf636a4f2172dcd8ec34ac4f52797b059195e5afd6409508c963e545f8864d (verified against the official release asset digest).

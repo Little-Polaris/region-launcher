@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Win32;
 
 static class Program
 {
@@ -54,7 +53,7 @@ sealed class Launcher : Form
         grid.RowStyles.Add(new(SizeType.Percent, 100));
         var title = new Label { Text = "美国 · 洛杉矶 · English (United States)", AutoSize = true, Font = new(Font, FontStyle.Bold), Padding = new(0, 0, 0, 12) };
         grid.Controls.Add(title, 0, 0); grid.SetColumnSpan(title, 3);
-        var notice = new Label { Text = "验证版：Claude Desktop 尚未适配验证。此工具不能保证账号状态，也不能完整接管外部浏览器、系统服务和所有 DNS 路径。", AutoSize = true, MaximumSize = new(730, 0), ForeColor = Color.DarkRed, Padding = new(0, 0, 0, 12) };
+        var notice = new Label { Text = "网络验证原型：Claude Desktop 尚未验证；单实例程序可能把请求交给外部已有进程。完整桌面应用隔离仍在验证中。", AutoSize = true, MaximumSize = new(730, 0), ForeColor = Color.DarkRed, Padding = new(0, 0, 0, 12) };
         grid.Controls.Add(notice, 0, 1); grid.SetColumnSpan(notice, 3);
         AddLabel(grid, "运行程序", 2); grid.Controls.Add(executable, 1, 2);
         var browse = new Button { Text = "选择…", AutoSize = true };
@@ -73,14 +72,10 @@ sealed class Launcher : Form
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start); buttons.Controls.Add(stop);
         var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => { executable.Text = Path.Combine(AppContext.BaseDirectory, "RegionProbe.exe"); arguments.Text = ""; };
         buttons.Controls.Add(probe); grid.Controls.Add(buttons, 0, 8); grid.SetColumnSpan(buttons, 3);
-        var browser = new Button { Text = "打开独立浏览器", AutoSize = true };
-        browser.Click += async (_, _) => await OpenBrowser(); buttons.Controls.Add(browser);
+        var join = new Button { Text = "加入所选程序", AutoSize = true };
+        join.Click += async (_, _) => await StartSession(session != null); buttons.Controls.Add(join);
         grid.Controls.Add(log, 0, 9); grid.SetColumnSpan(log, 3); Controls.Add(grid);
-        start.Click += async (_, _) => {
-            if (Path.GetFileName(executable.Text.Trim()).ToLowerInvariant() is "chrome.exe" or "msedge.exe")
-                await OpenBrowser(executable.Text.Trim());
-            else await StartSession();
-        }; stop.Click += (_, _) => StopSession();
+        start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
         FormClosing += (_, e) =>
         {
             if (session != null && e.CloseReason == CloseReason.UserClosing &&
@@ -111,39 +106,16 @@ sealed class Launcher : Form
         byte[] answer = new byte[2]; await stream.ReadExactlyAsync(answer, cts.Token);
         if (answer[0] != 5 || answer[1] != 0) throw new IOException("此版本需要无需认证的 SOCKS5 代理。");
     }
-    static string? FindBrowser()
-    {
-        foreach (string name in new[] { "chrome.exe", "msedge.exe" })
-            foreach (RegistryKey hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
-            {
-                using var key = hive.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + name);
-                if (key?.GetValue("") is string path && File.Exists(path)) return path;
-            }
-        return null;
-    }
-    async Task OpenBrowser(string? selectedPath = null)
-    {
-        try
-        {
-            var path = selectedPath ?? FindBrowser() ?? throw new FileNotFoundException("未找到 Chrome 或 Edge，请先安装其中一个浏览器。");
-            if (!System.Net.IPAddress.TryParse(proxyHost.Text.Trim(), out var ip) || !System.Net.IPAddress.IsLoopback(ip))
-                throw new ArgumentException("独立浏览器入口目前使用本机代理，请填 127.0.0.1。");
-            string browserData = Path.Combine(data, "browser", Path.GetFileNameWithoutExtension(path));
-            Directory.CreateDirectory(browserData);
-            string browserArgs = $"--user-data-dir=\"{browserData}\" --no-first-run --no-default-browser-check --lang=en-US --proxy-server=\"socks5://{proxyHost.Text.Trim()}:{proxyPort.Value}\" --host-resolver-rules=\"MAP * ~NOTFOUND, EXCLUDE {proxyHost.Text.Trim()}, EXCLUDE localhost\" --force-webrtc-ip-handling-policy=disable_non_proxied_udp about:blank";
-            Append("独立浏览器使用专用资料目录；不会复用外面的浏览器窗口。");
-            await StartSession(path, browserArgs, session != null);
-        }
-        catch (Exception ex) { Append("浏览器未启动：" + ex.Message); }
-    }
-    async Task StartSession(string? applicationOverride = null, string? argumentsOverride = null, bool join = false)
+    async Task StartSession(bool join = false)
     {
         if (session != null && !join) return;
         try
         {
-            string app = Path.GetFullPath(applicationOverride ?? executable.Text.Trim()); if (!File.Exists(app)) throw new FileNotFoundException("请选择存在的 .exe 程序。");
-            string appArgs = argumentsOverride ?? arguments.Text;
+            string app = Path.GetFullPath(executable.Text.Trim()); if (!File.Exists(app)) throw new FileNotFoundException("请选择存在的 .exe 程序。");
+            string appArgs = arguments.Text;
             foreach (string s in new[] { app, appArgs, proxyHost.Text }) if (s.Contains('\n') || s.Contains('\r') || s.Contains('\0')) throw new ArgumentException("配置不能包含换行符或空字符。");
+            if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
+            string dnsAddress = dedicatedProxy.DnsAddress;
             start.Enabled = false; await CheckProxy();
             var profile = new Profile { Application = executable.Text, Arguments = arguments.Text, ProxyHost = proxyHost.Text.Trim(), ProxyPort = (int)proxyPort.Value, AutoDst = dst.Checked };
             File.WriteAllText(Path.Combine(data, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
@@ -151,13 +123,14 @@ sealed class Launcher : Form
             string folder = Path.Combine(data, "sessions", id); Directory.CreateDirectory(folder); string config = Path.Combine(folder, "session.ini");
             string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale=en-US\r\nRegion=US\r\nGeo=244\r\nTimeZone=Pacific Standard Time\r\nAutoDst={(dst.Checked ? 1 : 0)}\r\n";
             File.WriteAllText(config, ini, Encoding.Unicode);
+            File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
             var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "RegionSession.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             psi.ArgumentList.Add(join ? "--join" : "--run"); psi.ArgumentList.Add(config);
             var candidate = new Process { StartInfo = psi }; candidate.OutputDataReceived += (_, e) => { if (e.Data != null) Append(e.Data); }; candidate.ErrorDataReceived += (_, e) => { if (e.Data != null) Append(e.Data); };
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
             if (join)
             {
-                using (candidate) { candidate.BeginOutputReadLine(); candidate.BeginErrorReadLine(); await candidate.WaitForExitAsync(); Append($"浏览器启动进程已结束，退出码 {candidate.ExitCode}。"); }
+                using (candidate) { candidate.BeginOutputReadLine(); candidate.BeginErrorReadLine(); await candidate.WaitForExitAsync(); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
             session = candidate; session.BeginOutputReadLine(); session.BeginErrorReadLine(); stop.Enabled = true;

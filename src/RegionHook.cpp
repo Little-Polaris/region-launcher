@@ -3,6 +3,14 @@
 #include <string>
 #include <vector>
 #include "detours.h"
+#include "UnifiedDns.h"
+
+static void (WINAPI *realEntry)();
+static void WINAPI unifiedEntry() {
+    // Run after the loader lock is released, before the application's own entry point.
+    if (!ConfigureUnifiedDns()) ExitProcess(GetLastError() ? GetLastError() : ERROR_BAD_CONFIGURATION);
+    realEntry();
+}
 
 static WCHAR locale[LOCALE_NAME_MAX_LENGTH], region[16];
 static LCID lcid;
@@ -156,7 +164,14 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (DetourTransactionBegin() != NO_ERROR) return FALSE;
     DetourUpdateThread(GetCurrentThread());
     LONG status = NO_ERROR;
+    if (!AttachIPv4Hooks()) status = ERROR_INVALID_FUNCTION;
 #define HOOK(old, replacement) if (DetourAttach(&(PVOID&)(old), replacement) != NO_ERROR) status = ERROR_INVALID_FUNCTION
+    if (GetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", nullptr, 0)) {
+        if (!AttachUnifiedDnsHooks()) status = ERROR_INVALID_FUNCTION;
+        realEntry = (decltype(realEntry))DetourGetEntryPoint(GetModuleHandleW(nullptr));
+        if (!realEntry) status = ERROR_INVALID_FUNCTION;
+        else { HOOK(realEntry, unifiedEntry); }
+    }
     HOOK(realUserLocaleName, localeName); HOOK(realSystemLocaleName, localeName);
     HOOK(realUserLCID, getLCID); HOOK(realSystemLCID, getLCID);
     HOOK(realThreadLCID, getLCID); HOOK(realThreadUI, getLang); HOOK(realThreadLanguages, uiLanguages);

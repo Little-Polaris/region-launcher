@@ -1,5 +1,59 @@
 #include "pb_internal.h"
 
+static UINT32 private_dns_ip;
+static volatile LONG dns_workers;
+PROXYBRIDGE_API BOOL ProxyBridge_SetDnsResolver(const char* address)
+{
+    struct in_addr parsed;
+    if (running || !address || InetPtonA(AF_INET, address, &parsed) != 1 ||
+        (ntohl(parsed.s_addr) >> 24) != 127) return FALSE;
+    private_dns_ip = parsed.s_addr;
+    return TRUE;
+}
+typedef struct {
+    SOCKET relay;
+    struct sockaddr_storage client;
+    int client_len, size;
+    unsigned char packet[MAXBUF];
+} DNS_WORK;
+
+static DWORD WINAPI dns_forward(LPVOID opaque)
+{
+    DNS_WORK* work = opaque;
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock != INVALID_SOCKET) {
+        struct sockaddr_in server = {0};
+        server.sin_family = AF_INET; server.sin_port = htons(53); server.sin_addr.s_addr = private_dns_ip;
+        DWORD timeout = 2500;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        unsigned char reply[MAXBUF];
+        // A connected UDP socket accepts answers only from this private resolver.
+        if (connect(sock, (struct sockaddr*)&server, sizeof(server)) == 0 &&
+            send(sock, (char*)work->packet, work->size, 0) == work->size) {
+            int size = recv(sock, (char*)reply, sizeof(reply), 0);
+            if (running && size >= 12 && reply[0] == work->packet[0] && reply[1] == work->packet[1])
+                sendto(work->relay, (char*)reply, size, 0, (struct sockaddr*)&work->client, work->client_len);
+        }
+        closesocket(sock);
+    }
+    free(work);
+    InterlockedDecrement(&dns_workers); InterlockedDecrement(&g_handler_threads);
+    return 0;
+}
+static void dns_enqueue(SOCKET relay, const struct sockaddr* client, int client_len, const unsigned char* packet, int size)
+{
+    if (size < 12 || size > MAXBUF || client_len > sizeof(struct sockaddr_storage)) return;
+    if (InterlockedIncrement(&dns_workers) > 128) { InterlockedDecrement(&dns_workers); return; }
+    DNS_WORK* work = malloc(sizeof(DNS_WORK));
+    if (!work) { InterlockedDecrement(&dns_workers); return; }
+    work->relay = relay; work->client_len = client_len; work->size = size;
+    memcpy(&work->client, client, client_len); memcpy(work->packet, packet, size);
+    InterlockedIncrement(&g_handler_threads);
+    if (!QueueUserWorkItem(dns_forward, work, WT_EXECUTELONGFUNCTION)) {
+        free(work); InterlockedDecrement(&dns_workers); InterlockedDecrement(&g_handler_threads);
+    }
+}
+
 // Relay: TCP/UDP relay servers and per-connection worker threads.
 
 DWORD WINAPI udp_relay_server(LPVOID arg)
@@ -169,6 +223,10 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                 UINT32 proxy_config_id = 0;
                 if (get_connection_full_x(from_port, TRUE, &dest_ip, &dest_port, &proxy_config_id, NULL, NULL, (UINT32)recv_len))
                 {
+                    if (private_dns_ip && dest_port == 53) {
+                        dns_enqueue(udp_relay_socket, (struct sockaddr*)&from_addr, from_len, recv_buf, recv_len);
+                        continue;
+                    }
                     PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
 
                     if (cfg == NULL || cfg->type != PROXY_TYPE_SOCKS5)
@@ -362,6 +420,10 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
 
                 if (get_connection_full_v6_x(from_port, TRUE, dest_ip6, &dest_port, &proxy_config_id, NULL, NULL, (UINT32)recv_len))
                 {
+                    if (private_dns_ip && dest_port == 53) {
+                        dns_enqueue(udp_relay_socket6, (struct sockaddr*)&from_addr6, fl, recv_buf, recv_len);
+                        continue;
+                    }
                     PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
                     if (cfg != NULL && cfg->type == PROXY_TYPE_SOCKS5)
                     {
@@ -383,6 +445,8 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
         }
     }
 
+    // Workers may still be returning DNS replies through these relay sockets.
+    while (dns_workers > 0) Sleep(10);
     // Clean up all proxy UDP sockets
     for (int i = 0; i < g_proxy_config_count; i++)
     {
@@ -652,6 +716,8 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
     socks_addr.sin_family = AF_INET;
     socks_addr.sin_addr.s_addr = proxy_ip;
     socks_addr.sin_port = htons(proxy->port);
+    BOOL dns_connection = private_dns_ip && dest_port == 53;
+    if (dns_connection) { socks_addr.sin_addr.s_addr = private_dns_ip; socks_addr.sin_port = htons(53); }
 
     if (connect(socks_sock, (struct sockaddr *)&socks_addr, sizeof(socks_addr)) == SOCKET_ERROR)
     {
@@ -661,7 +727,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         return 0;
     }
 
-    if (proxy->type == PROXY_TYPE_SOCKS5)
+    if (!dns_connection && proxy->type == PROXY_TYPE_SOCKS5)
     {
         int rc;
         char cached_domain[256];
@@ -688,7 +754,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
             return 0;
         }
     }
-    else if (proxy->type == PROXY_TYPE_HTTP)
+    else if (!dns_connection && proxy->type == PROXY_TYPE_HTTP)
     {
         int rc = is_ipv6
             ? http_connect_v6(socks_sock, dest_ip6, dest_port, proxy)

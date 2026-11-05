@@ -268,20 +268,8 @@ void cleanup_stale_dns_cache(void)
     ReleaseSRWLockExclusive(&g_dns_cache_lock);
 }
 
-// Flush the Windows DNS resolver cache so applications re-resolve hostnames on the
-// wire, where our port-53 snoop can capture the IP->hostname mapping. Without this a
-// domain that was resolved before a domain rule existed would have no cached mapping
-// and the rule could not match. DnsFlushResolverCache is loaded dynamically so we
-// avoid a hard dnsapi.lib dependency (keeps the MinGW/GCC build path unchanged).
 void flush_dns_resolver_cache(void)
 {
-    HMODULE dnsapi = LoadLibraryA("dnsapi.dll");
-    if (dnsapi == NULL)
-        return;
-    typedef BOOL (WINAPI *DnsFlushFn)(void);
-    DnsFlushFn fn = (DnsFlushFn)GetProcAddress(dnsapi, "DnsFlushResolverCache");
-    if (fn != NULL)
-        fn();
-    FreeLibrary(dnsapi);
+    // Instance-scoped routing must not invalidate the host's shared DNS cache.
 }
 

@@ -90,6 +90,8 @@ PROXYBRIDGE_API void ProxyBridge_ClearConnectionLogs(void);  // Clear connection
 // Region Launcher: the owner supplies a process-instance membership predicate.
 typedef BOOL (*ProcessScopeCallback)(DWORD pid);
 PROXYBRIDGE_API void ProxyBridge_SetProcessScope(ProcessScopeCallback callback);
+// Redirect selected applications' port-53 traffic to a private loopback resolver.
+PROXYBRIDGE_API BOOL ProxyBridge_SetDnsResolver(const char* loopback_address);
 PROXYBRIDGE_API BOOL ProxyBridge_Start(void);
 PROXYBRIDGE_API BOOL ProxyBridge_Stop(void);
 #ifdef __cplusplus

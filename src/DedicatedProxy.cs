@@ -12,6 +12,14 @@ sealed class DedicatedProxy : IDisposable
     public bool Configured => File.Exists(config);
     public event Action? UnexpectedExit;
     public int Port { get { using var json = JsonDocument.Parse(File.ReadAllText(config)); return json.RootElement.GetProperty("mixed-port").GetInt32(); } }
+    public string DnsAddress {
+        get {
+            using var json = JsonDocument.Parse(File.ReadAllText(config));
+            if (!json.RootElement.GetProperty("dns").TryGetProperty("listen", out var listen) || listen.GetString() != "127.0.0.153:53")
+                throw new IOException("独立代理配置需要启用专用 DNS 127.0.0.153:53。");
+            return "127.0.0.153";
+        }
+    }
 
     public async Task EnsureStarted()
     {
@@ -19,6 +27,11 @@ sealed class DedicatedProxy : IDisposable
         try
         {
             if (process is { HasExited: false }) return;
+            var dnsIp = IPAddress.Parse(DnsAddress);
+            using (var dnsUdp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                dnsUdp.Bind(new IPEndPoint(dnsIp, 53));
+            var dnsTcp = new TcpListener(dnsIp, 53);
+            try { dnsTcp.Start(); } finally { dnsTcp.Stop(); }
             // Refuse to reuse an unrelated service on the dedicated port.
             var probe = new TcpListener(IPAddress.Loopback, Port);
             try { probe.Start(); } finally { probe.Stop(); }
@@ -35,7 +48,10 @@ sealed class DedicatedProxy : IDisposable
             {
                 if (candidate.HasExited) throw new IOException("独立代理内核启动失败，请检查节点配置。");
                 using var socket = new TcpClient();
-                try { await socket.ConnectAsync(IPAddress.Loopback, Port); return; }
+                try {
+                    await socket.ConnectAsync(IPAddress.Loopback, Port);
+                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53); return;
+                }
                 catch (SocketException) { await Task.Delay(100); }
             }
             Dispose();

@@ -13,6 +13,7 @@ class DedicatedConfigTest(unittest.TestCase):
         c = module.make_config(original)
         self.assertEqual(c['rules'], ['MATCH,RegionExit'])
         self.assertEqual(c['dns']['nameserver'], ['https://1.1.1.1/dns-query#RegionExit'])
+        self.assertEqual(c['dns']['listen'], '127.0.0.153:53')
         self.assertEqual(c['bind-address'], '127.0.0.1')
         self.assertFalse(c['tun']['enable'])
         self.assertEqual(len(c['proxies']), 1)

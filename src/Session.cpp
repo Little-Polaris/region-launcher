@@ -65,13 +65,21 @@ static int broker(DWORD parent) {
     IMPORT(ProxyBridge_SetProcessScope); IMPORT(ProxyBridge_SetLogCallback); IMPORT(ProxyBridge_SetConnectionCallback);
     IMPORT(ProxyBridge_SetTrafficLoggingEnabled); IMPORT(ProxyBridge_AddProxyConfig); IMPORT(ProxyBridge_AddRule);
     IMPORT(ProxyBridge_Start); IMPORT(ProxyBridge_Stop);
+    IMPORT(ProxyBridge_SetDnsResolver);
 #undef IMPORT
     ProxyBridge_SetProcessScope(belongs); ProxyBridge_SetLogCallback(logLine); ProxyBridge_SetConnectionCallback(connection);
     ProxyBridge_SetTrafficLoggingEnabled(TRUE);
     auto host = utf8(get(L"ProxyHost", L"127.0.0.1")); int port = _wtoi(get(L"ProxyPort", L"7890").c_str());
     if (port < 1 || port > 65535) return 2;
-    auto id = ProxyBridge_AddProxyConfig(PROXY_TYPE_SOCKS5, host.c_str(), (UINT16)port, "", "", TRUE);
+    auto id = ProxyBridge_AddProxyConfig(PROXY_TYPE_SOCKS5, host.c_str(), (UINT16)port, "", "", FALSE);
     BOOL proxyLoopback = get(L"ProxyLoopback", L"0") == L"1";
+    if (!ProxyBridge_AddRule("*", "::/0", "*", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_BLOCK, 0, TRUE))
+        return error(L"IPv6 block rule could not be installed");
+    auto dns = utf8(get(L"DnsAddress"));
+    if (!get(L"DnsAddress").empty() &&
+        (!ProxyBridge_SetDnsResolver(dns.c_str()) ||
+         !ProxyBridge_AddRule("*", "*", "53", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_PROXY, id, TRUE)))
+        return error(L"Private DNS configuration rejected");
     if (!id || !ProxyBridge_AddRule("*", "*", "*", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_PROXY, id, proxyLoopback)) return error(L"Proxy configuration rejected");
     if (!ProxyBridge_Start()) return error(L"Proxy driver could not start; see network log");
     SetEvent(ready);
@@ -90,7 +98,7 @@ static bool x64Image(const std::wstring& path) {
         fread(&header, sizeof(header), 1, f) == 1 && signature == IMAGE_NT_SIGNATURE && header.Machine == IMAGE_FILE_MACHINE_AMD64;
     fclose(f); return valid;
 }
-static int run(bool localeOnly, bool joining = false) {
+static int run(bool localeOnly, bool joining = false, bool inject = true) {
     auto app = get(L"Application"); if (!x64Image(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"This build requires an x64 Windows executable"); }
     DWORD ownerPid = wcstoul(get(L"OwnerPid", L"0").c_str(), nullptr, 10);
     HANDLE owner = ownerPid ? OpenProcess(SYNCHRONIZE, FALSE, ownerPid) : nullptr;
@@ -119,6 +127,7 @@ static int run(bool localeOnly, bool joining = false) {
     SetEnvironmentVariableW(L"REGION_LAUNCHER_REGION", get(L"Region", L"US").c_str());
     SetEnvironmentVariableW(L"REGION_LAUNCHER_GEO", get(L"Geo", L"244").c_str());
     SetEnvironmentVariableW(L"REGION_LAUNCHER_DST", get(L"AutoDst", L"1").c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", get(L"DnsAddress").empty() ? nullptr : get(L"DnsAddress").c_str());
     SetEnvironmentVariableW(L"TZ", get(L"AutoDst", L"1") == L"1" ? L"America/Los_Angeles" : L"Etc/GMT+8");
     SetEnvironmentVariableW(L"LANG", L"en_US.UTF-8");
     auto dll = utf8(directory() + L"\\RegionHook.dll");
@@ -135,8 +144,10 @@ static int run(bool localeOnly, bool joining = false) {
             DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &stdCopies[i], 0, TRUE, DUPLICATE_SAME_ACCESS);
     }
     si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = stdCopies[0]; si.hStdOutput = stdCopies[1]; si.hStdError = stdCopies[2];
-    BOOL created = DetourCreateProcessWithDllExW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
-        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi, dll.c_str(), nullptr);
+    BOOL created = inject ? DetourCreateProcessWithDllExW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
+        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi, dll.c_str(), nullptr) :
+        CreateProcessW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
+        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi);
     DWORD createError = GetLastError();
     for (HANDLE handle : stdCopies) if (handle) CloseHandle(handle);
     SetLastError(createError);
@@ -170,5 +181,7 @@ int wmain(int argc, wchar_t** argv) {
     if (!_wcsicmp(argv[1], L"--run")) return run(false);
     if (!_wcsicmp(argv[1], L"--join")) return run(false, true);
     if (!_wcsicmp(argv[1], L"--locale-test")) return run(true);
+    // Fixture-only: exercise the packet engine independently of API instrumentation.
+    if (!_wcsicmp(argv[1], L"--network-test")) return run(false, false, false);
     return 2;
 }

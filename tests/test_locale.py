@@ -4,7 +4,7 @@ import subprocess
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / 'build/bin'
+BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/bin'))
 OUT = ROOT / 'build/test-results'
 OUT.mkdir(parents=True, exist_ok=True)
 

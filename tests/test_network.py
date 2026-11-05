@@ -3,6 +3,7 @@
 The native session elevates only its network engine and changes no system routes/DNS.
 """
 import ctypes
+import os
 import socket
 import struct
 import subprocess
@@ -11,7 +12,7 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / 'build/bin'
+BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/bin'))
 OUT = ROOT / 'build/test-results/network'
 OUT.mkdir(parents=True, exist_ok=True)
 

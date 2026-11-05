@@ -1,7 +1,9 @@
+param([string]$BinDirectory = '')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$bin = if ($BinDirectory) { [IO.Path]::GetFullPath($BinDirectory) } else { Join-Path $root 'build/bin' }
 $workspace = Split-Path (Split-Path $root -Parent) -Parent
-$output = Join-Path $workspace 'outputs/region-launcher'
+$output = Join-Path $workspace 'outputs/region-launcher-unified'
 $app = Join-Path $output 'app'
 $docs = Join-Path $output 'docs'
 $source = Join-Path $output 'source'
@@ -9,16 +11,16 @@ $packages = Join-Path $output 'packages'
 $licenses = Join-Path $app 'licenses'
 $version = ([xml](Get-Content "$root/src/RegionLauncher.csproj" -Raw)).Project.PropertyGroup.Version
 New-Item -ItemType Directory -Force -Path $app,$docs,$source,$packages,$licenses | Out-Null
-$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','RegionSession.exe','RegionHook.dll','RegionProbe.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')
+$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','RegionSession.exe','RegionHook.dll','RegionProbe.exe','DnsProbe.exe','ProxyBridgeCore.dll','WinDivert.dll','WinDivert64.sys')
 foreach ($file in $files) {
-    $from = Join-Path "$root/build/bin" $file; $to = Join-Path $app $file
+    $from = Join-Path $bin $file; $to = Join-Path $app $file
     if (!(Test-Path $to) -or (Get-FileHash $from).Hash -ne (Get-FileHash $to).Hash) {
         Copy-Item -LiteralPath $from -Destination $to -Force
     }
 }
-if (Test-Path "$root/build/bin/proxy") {
+if (Test-Path "$bin/proxy") {
     New-Item -ItemType Directory -Force -Path "$app/proxy" | Out-Null
-    foreach ($item in Get-ChildItem "$root/build/bin/proxy" -File) {
+    foreach ($item in Get-ChildItem "$bin/proxy" -File) {
         $to = Join-Path "$app/proxy" $item.Name
         if (!(Test-Path $to) -or (Get-FileHash $item.FullName).Hash -ne (Get-FileHash $to).Hash) {
             Copy-Item -LiteralPath $item.FullName -Destination $to -Force
