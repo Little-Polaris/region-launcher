@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $download = Join-Path $root 'build/downloads'
-$target = Join-Path $root 'build/bin/proxy'
+$target = Join-Path $root 'build/service-bin/proxy'
 New-Item -ItemType Directory -Force -Path $download,$target | Out-Null
 $url = 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.33/mihomo-windows-amd64-compatible-v1.19.33.zip'
 $zip = Join-Path $download 'mihomo.zip'

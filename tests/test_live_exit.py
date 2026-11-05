@@ -1,5 +1,6 @@
 """Opt-in live smoke test: official proxy core, CN/Cloudflare exits and DNS witnesses."""
 import json
+import os
 import re
 import socket
 import subprocess
@@ -8,7 +9,7 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / 'build/bin'
+BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/service-bin'))
 OUT = ROOT / 'build/test-results/live-exit'
 OUT.mkdir(parents=True, exist_ok=True)
 CONFIG = BIN / 'data/private/proxy.json'

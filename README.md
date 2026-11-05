@@ -33,12 +33,12 @@ Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 D
 本机依赖 Visual Studio C++、.NET 10、PowerShell 7 和 Python。测试不安装或登录 Claude。
 
 ```powershell
-pwsh -NoProfile -File scripts/build.ps1 -BinDirectory ./build/ipv4-bin
-$env:REGION_TEST_BIN = (Resolve-Path ./build/ipv4-bin).Path
+pwsh -NoProfile -File scripts/build.ps1 -BinDirectory ./build/service-bin
+$env:REGION_TEST_BIN = (Resolve-Path ./build/service-bin).Path
 python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py
 python -X utf8 tests/test_private_proxy.py
-pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/ipv4-bin
+pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/service-bin
 ```
 
 首次安装或更新网络后台服务需要管理员确认，安装后完整网络验收从普通权限运行。在线测试还需要构建目录中的 `proxy/mihomo.exe` 和本机私有节点配置 `data/private/proxy.json`；使用独立端口 17891，结束后退出测试内核。不要上传节点配置。

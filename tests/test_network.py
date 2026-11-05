@@ -1,6 +1,6 @@
 """Local-only integration: no requests to Claude or any external destination.
 
-The native session elevates only its network engine and changes no system routes/DNS.
+The ordinary user session uses the installed network service and changes no system routes/DNS.
 """
 import ctypes
 import os
@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/bin'))
+BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/service-bin'))
 OUT = ROOT / 'build/test-results/network'
 OUT.mkdir(parents=True, exist_ok=True)
 

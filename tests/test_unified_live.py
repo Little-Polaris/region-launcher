@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/bin'))
+BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/service-bin'))
 OUT = ROOT / 'build/test-results/unified-live'
 
 
