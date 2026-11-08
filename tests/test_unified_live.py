@@ -8,6 +8,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from test_system_proxy import fetch_windows
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/service-bin'))
@@ -26,6 +27,7 @@ def client():
     trace = dict(line.split('=', 1) for line in fetch('https://1.1.1.1/cdn-cgi/trace').splitlines() if '=' in line)
     result['cloudflare'] = {'ip': trace['ip'], 'country': trace['loc']}
     result['china_site_ip'] = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', fetch('https://my.ip.cn/')).group()
+    result['windows_http'] = {api: re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', fetch_windows('https://my.ip.cn/', api)).group() for api in ('winhttp', 'wininet')}
     token = uuid.uuid4().hex
     result['python_resolver'] = socket.getaddrinfo('www.cloudflare.com', 443, socket.AF_INET)[0][4][0]
     for i in (1, 2):
@@ -49,8 +51,9 @@ def client():
         result['dns'].append({'ip': address, 'country': geo.get('country_code'), 'isp': geo.get('isp')})
     (OUT/'inside-results.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf8')
     assert trace['loc'] == 'US' and trace['ip'] == result['china_site_ip'], result
+    assert all(address == trace['ip'] for address in result['windows_http'].values()), result
     assert servers and native_servers and result['dns_by_path']['python'] and all(d['country'].lower() == 'us' for d in result['dns']), result
-    print('PASS: ordinary curl + Python DNS, US exit for both witnesses, remote US DNS', flush=True)
+    print('PASS: curl + WinHTTP + WinINet share US exit; Python/native DNS use remote US resolvers', flush=True)
 
 
 def main():

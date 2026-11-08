@@ -120,6 +120,12 @@ static bool configureEnvironment() {
 static int run(bool localeOnly, bool joining = false, bool inject = true) {
     auto app = get(L"Application"); if (!x64Image(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"This build requires an x64 Windows executable"); }
     if (!configureEnvironment()) return error(L"Invalid Windows country, language or time zone settings");
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", localeOnly ? nullptr : L"1");
+    if (!localeOnly) {
+        // Windows environment names are case-insensitive; only this process and
+        // its children change. The host proxy remains available to outside apps.
+        for (auto name : {L"HTTP_PROXY", L"HTTPS_PROXY", L"ALL_PROXY", L"NO_PROXY"}) SetEnvironmentVariableW(name, nullptr);
+    }
     DWORD ownerPid = wcstoul(get(L"OwnerPid", L"0").c_str(), nullptr, 10);
     HANDLE owner = ownerPid ? OpenProcess(SYNCHRONIZE, FALSE, ownerPid) : nullptr;
     if (ownerPid && !owner) return error(L"Launcher is no longer running");

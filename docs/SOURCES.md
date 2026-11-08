@@ -1,5 +1,11 @@
 # Sources
 
+Windows inherited proxy interfaces:
+https://learn.microsoft.com/en-us/windows/win32/api/winhttp/nf-winhttp-winhttpgetieproxyconfigforcurrentuser
+https://learn.microsoft.com/en-us/windows/win32/api/wininet/nf-wininet-internetopena
+Chromium system proxy reader (uses the public WinHTTP user proxy query):
+https://raw.githubusercontent.com/chromium/chromium/main/net/proxy_resolution/win/proxy_config_service_win.cc
+
 Windows DNS API contracts used by the unified prototype:
 https://learn.microsoft.com/en-us/windows/win32/api/windns/nf-windns-dnsqueryex
 https://learn.microsoft.com/en-us/windows/win32/api/windns/ns-windns-dns_query_request

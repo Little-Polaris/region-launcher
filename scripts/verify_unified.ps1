@@ -26,7 +26,7 @@ $passed = @()
 try {
     $before = Snapshot
     Set-Content -LiteralPath $logPath -Value 'Unified network / IPv4-only verification' -Encoding utf8
-    foreach ($test in @('test_service.py','test_unified_dns.py','test_network.py','test_unified_live.py')) {
+    foreach ($test in @('test_service.py','test_system_proxy.py','test_unified_dns.py','test_network.py','test_unified_live.py')) {
         $testArgs = @('-X','utf8',"tests/$test")
         if ($test -eq 'test_unified_dns.py') { $testArgs += @('--network','--failure') }
         & python @testArgs *>> $logPath

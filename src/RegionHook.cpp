@@ -4,6 +4,7 @@
 #include <vector>
 #include "detours.h"
 #include "UnifiedDns.h"
+#include "SystemProxy.h"
 
 static void (WINAPI *realEntry)();
 static void WINAPI unifiedEntry() {
@@ -164,6 +165,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (DetourTransactionBegin() != NO_ERROR) return FALSE;
     DetourUpdateThread(GetCurrentThread());
     LONG status = NO_ERROR;
+    if (GetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", nullptr, 0) && !AttachSystemProxyHooks()) status = ERROR_INVALID_FUNCTION;
     if (!AttachIPv4Hooks()) status = ERROR_INVALID_FUNCTION;
 #define HOOK(old, replacement) if (DetourAttach(&(PVOID&)(old), replacement) != NO_ERROR) status = ERROR_INVALID_FUNCTION
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", nullptr, 0)) {
