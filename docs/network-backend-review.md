@@ -24,9 +24,22 @@
 | Sandboxie Plus 代理 | 通用 Winsock TCP SOCKS5 CONNECT | [官方代理说明](https://github.com/sandboxie-plus/sandboxie-docs/blob/main/docs/PlusContent/ProxySupport.md) 明确不支持 UDP ASSOCIATE/UDP 代理，且代理本身不自动创建 WFP 防泄漏规则。单独启用不能覆盖本任务要求。 |
 | Force-Proxy DLL | 通用 Winsock IPv4 TCP/UDP 钩子 | [README](https://github.com/runetfreedom/force-proxy) 只列出部分 API；尚未验证 ConnectEx、重叠 I/O 等路径，也没有网络层防泄漏边界，不能视为等价的通用接管。 |
 
-ProxiFyre 已读取 README 并下载源码到隔离的 `build/research/network-backend/source`，固定提交 `5e3bc845d73a47a0931b1233c745580cb916f4ba`，只读审查，未构建、运行或安装。关键检查点为 `netlib/src/proxy/process_routing_policy.h` 的 `match_owner_to_app`，以及 `netlib/src/proxy/socks_local_router.h` 的 IPv6 分片放行分支。项目为 AGPL-3.0；底层 Windows Packet Filter 使用单独许可，不能把用户态源码许可视为驱动许可。
+ProxiFyre 已读取 README 并下载源码到隔离的 `build/research/network-backend/source`，固定提交 `5e3bc845d73a47a0931b1233c745580cb916f4ba`，原始源码保持不变，未运行或安装其完整程序和驱动。关键检查点为 `netlib/src/proxy/process_routing_policy.h` 的 `match_owner_to_app`，以及 `netlib/src/proxy/socks_local_router.h` 的 IPv6 分片放行分支。项目为 AGPL-3.0；底层 Windows Packet Filter 使用单独许可，不能把用户态源码许可视为驱动许可。
 
 参考：[ProxiFyre README](https://github.com/wiresock/proxifyre)、[Windows Packet Filter 官方下载说明](https://www.ntkernel.com/windows-packet-filter/download/)。其他候选没有在此电脑上安装。不能通过更换同一驱动的签名或文件名来绕过已经观察到的拦截。
+
+## 无驱动隔离实验
+
+`experiments/proxifyre/scripts/check_scope.ps1` 编译并运行了单独的 ScopeProbe。它创建同一个可执行文件的两个挂起进程，只把其中一个加入真实 Windows Job；结束时只清理这两个自建进程。没有套接字调用，不打开驱动，不修改网络设置。
+
+实验直接包含上述固定提交的原始路由策略头文件（SHA-256 `6AA9E7DC770643DFEFCD98C598A5F0F3F82DEBEF9810B2D2816F99DB98EFA200`），使用最小进程记录夹具，而不是网络连接表。结果：
+
+- 上游名称规则匹配两个实例；实际 Job 查询可以区分内外。
+- 上游缓存端口分支会跳过重新选择代理。因此只在名称匹配回调里添加 Job 判断仍不够，实例归属检查必须位于缓存使用之前。
+- 查询失败单独保留为 unknown，不能直接当作“外部进程”放行。尚未决定网络层如何在归属未知时同时保证环境内不泄漏、环境外不误拦。
+- IPv6 分片和多播可能在识别进程前放行，属于另一个必须处理的路径。
+
+输出位于 `build/research/network-backend/scope-probe/results.txt`。该实验只证明进程组判定和所审查策略函数的分支行为；不证明进程与数据包的真实关联，不证明内核拦截、DNS、IPv6 或浏览器已经可用。实验尚未接入已安装后台。
 
 ## 验收仍需完成
 
