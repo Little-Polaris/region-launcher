@@ -13,7 +13,7 @@ foreach ($file in @('RegionNetworkService.exe','ProxyBridgeCore.dll','WinDivert.
 @{product='RegionLauncherNetwork'; files=$hashes} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $package manifest.json) -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot install_service.ps1) -Destination $package -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot request_install.ps1) -Destination (Join-Path $output install) -Force
-$entry = '@echo off' + "`r`n" + 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\request_install.ps1"' + "`r`n" + 'pause' + "`r`n"
+$entry = '@echo off' + "`r`n" + 'title Region Launcher Service Setup' + "`r`n" + '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0install\request_install.ps1"' + "`r`n" + 'pause' + "`r`n"
 [IO.File]::WriteAllText((Join-Path $output '安装或更新后台服务.cmd'),$entry,[Text.Encoding]::ASCII)
 [IO.File]::WriteAllText((Join-Path $output '卸载后台服务.cmd'),$entry.Replace('request_install.ps1"','request_install.ps1" -Uninstall'),[Text.Encoding]::ASCII)
 foreach ($file in @('service.md','SOURCES.md')) { Copy-Item -LiteralPath (Join-Path $root "docs/$file") -Destination (Join-Path $output docs) -Force }
