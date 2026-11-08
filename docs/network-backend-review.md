@@ -43,6 +43,16 @@ ProxiFyre 已读取 README 并下载源码到隔离的 `build/research/network-b
 
 ## 验收仍需完成
 
+### 独立虚拟网卡路线的边界
+
+[Wintun 官方](https://www.wintun.net/) 提供已签名的三层虚拟网卡组件，但组件本身不提供进程组分流策略。[Mihomo TUN 文档](https://wiki.metacubex.one/en/config/inbound/tun/) 明确 `auto-route` 会设置全局路由；直接开启并不满足外部程序不受影响的要求。尚未安装 Wintun 或启用 TUN 自动路由。
+
+[IP_UNICAST_IF](https://learn.microsoft.com/en-us/windows/win32/winsock/ipproto-ip-socket-options) 是单个 IPv4 套接字的出口接口选项，不是进程组级强制隔离。仅确认这一 API 存在，不能推断所有 TCP/UDP、DNS 服务代发、IPv6、继承套接字和故障回退都已覆盖。没有将接口绑定实验或配置项当作完整替代后端。
+
+[SetCurrentThreadCompartmentId](https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-setcurrentthreadcompartmentid) 当前微软文档标为保留、要求不要使用。没有调用它创建或改变本机网络分区；不能将这条未受支持的路线作为已经可交付的无虚拟机隔离实现。
+
+这并不证明替代实现不可能，而是说明本轮候选中没有已核实可直接部署并满足全部要求的方案。已安装后端依赖的驱动仍被现有防护拦截，后续完整验收需要兼容的网络后端或厂商对该拦截的具体处理依据。当前不能靠重复加载、全局 TUN、名称规则、关闭防护或缩减测试范围推进验收。
+
 美国 / en-US / Pacific Standard Time / 自动冬夏令时是既定测试参数。保留按启动进程组隔离、组外不变、文件和硬件访问、IPv6 禁用、DNS 及 TCP/UDP 通用接管的全部要求。当前没有满足这些要求并通过本机完整验收的替代后端。
 
 实际浏览器访问 ip.net.coffee/claude/ 及目标颜色要求仍未验收。网页绿灯不替代网络路径证据；反过来，本地单元测试也不替代实际网页结果。
