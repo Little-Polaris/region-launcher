@@ -52,3 +52,18 @@
 
 Chromium 的 Windows 单实例实现可作为解释依据，不能替代本机验证：
 https://chromium.googlesource.com/chromium/src/+/lkgr/chrome/browser/process_singleton_win.cc
+
+## 原资料复制为启动器固定资料：验证通过
+
+2026-11-08 至 11-09，用户改为要求两份独立资料。确认使用原资料的 Chrome 已退出后，将原 `User Data` 复制至 `outputs/region-launcher-unified/app/data/chrome-user-profile`；跳过可重建缓存、崩溃报告和运行锁文件，保留书签、扩展、设置及会话文件。没有解密或输出登录凭据。
+
+- 共复制 5,671 个文件、1,017,074,084 字节；启动前逐文件 SHA256 与原件相同。副本启动后再次对原目录的这 5,671 个文件校验，全部未变。
+- 启动器已持久保存该固定目录、`--profile-directory=Default` 和 `--restore-last-session`。没有添加代理、DNS 或语言参数；后续使用同一副本。
+- 副本主进程 22352、联网进程 35644 均经 Windows API 确认属于当前环境 Job，窗口 263592 对应 22352。
+- 官方扩展连接恢复后列出全部 5 个会话标签页，并成功读取副本中的检测页。标签存在不代表各站点登录状态或页面内未提交内容均已验证。
+- 检测页三个 IPv4 出口均为 `15.253.23.247`，DNS 为美国 Cloudflare `172.70.213.45`，显示未检测到泄露；WebRTC 显示“已禁用或无泄露”。时区为洛杉矶，原资料的 `zh-CN,zh` 语言也被复制，语言一致性仍未通过。
+- 宿主机代理和网卡 DNS 与复制前相同；原件和副本 Preferences 的代理/DNS 相关字段相同。此次没有改变网络设置。
+
+本轮证据位于被 Git 忽略的 `build/test-results/profile-copy-20261108-235620/`，包含复制日志、完整文件校验清单、进程查询和 `verification.json`。个人资料及校验清单不得提交或打包。两份资料使用独立本地目录；若原有 Google 同步仍启用，云端同步行为另受账号设置控制，本轮未修改或验证同步设置。
+
+当前启动器使用副本，外部 Chrome 保留原目录。本轮未另外启动外部 Chrome 做双实例并发验收。
