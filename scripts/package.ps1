@@ -32,7 +32,7 @@ Copy-Item -LiteralPath "$root/vendor/detours/LICENSE.md" -Destination "$licenses
 Copy-Item -LiteralPath "$root/vendor/proxybridge/LICENSE" -Destination "$licenses/ProxyBridge-MIT.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/windivert/WinDivert-2.2.2-A/LICENSE" -Destination "$licenses/WinDivert-LICENSE.txt" -Force
 Copy-Item -LiteralPath "$root/README.md" -Destination "$output/使用说明.md" -Force
-Copy-Item -LiteralPath "$root/docs/SOURCES.md","$root/docs/validation.md" -Destination $docs -Force
+Get-ChildItem -LiteralPath "$root/docs" -Filter '*.md' -File | Copy-Item -Destination $docs -Force
 & (Join-Path $PSScriptRoot 'package_service.ps1') -BinDirectory $bin -OutputDirectory $output
 if (Test-Path -LiteralPath "$root/build/test-results/launcher.png") { Copy-Item -LiteralPath "$root/build/test-results/launcher.png" -Destination "$docs/launcher.png" -Force }
 Push-Location $root

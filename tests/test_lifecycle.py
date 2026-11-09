@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,8 +43,11 @@ def main():
     parser.add_argument('--cycles', type=int, default=12)
     parser.add_argument('--online', action='store_true')
     parser.add_argument('--selftest', action='store_true')
+    parser.add_argument('--observe-seconds', type=float, default=1,
+                        help='Outside-only observation duration when --selftest is used')
     args = parser.parse_args()
     assert args.cycles > 0
+    assert 0 < args.observe_seconds <= 600
     assert not c.windll.shell32.IsUserAnAdmin(), 'Use ordinary user privileges'
     out = ROOT/'build/test-results'/('lifecycle-'+time.strftime('%Y%m%d-%H%M%S'))
     out.mkdir(parents=True)
@@ -157,7 +161,7 @@ def main():
             if time.monotonic() > deadline: raise AssertionError('Outside baseline not healthy')
             time.sleep(.1)
         if args.selftest:
-            time.sleep(1)
+            time.sleep(args.observe_seconds)
         else:
             for index in range(args.cycles):
                 mode = ('stop-event', 'natural-exit', 'owner-exit')[index % 3]
@@ -195,10 +199,12 @@ def main():
                     # Preserve each worker log before the next worker truncates it.
                     logfile = Path(os.environ['ProgramFiles'])/'RegionLauncherNetwork/logs/network.log'
                     deadline = time.monotonic()+12
-                    while 'ProxyBridge stopped' not in logfile.read_text(errors='replace'):
+                    while True:
+                        try: log = logfile.read_text(errors='replace')
+                        except PermissionError: log = ''  # Worker still owns its write handle.
+                        if 'ProxyBridge stopped' in log: break
                         if time.monotonic() > deadline: raise AssertionError('Capture worker did not finish stopping')
                         time.sleep(.1)
-                    log = logfile.read_text(errors='replace')
                     (out/f'{index+1}-network.log').write_text(log, encoding='utf8')
                     assert 'WinDivertSend failed' not in log and 'shutdown failed' not in log, log
                     cycles.append({'index': index+1, 'mode': mode, 'exitCode': process.returncode})
@@ -213,6 +219,7 @@ def main():
         time.sleep(2)
     except Exception as ex:
         fatal = repr(ex)
+        (out/'failure.txt').write_text(traceback.format_exc(), encoding='utf8')
     finally:
         stop.set()
         for thread in threads: thread.join(timeout=16)
