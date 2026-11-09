@@ -167,7 +167,9 @@ DWORD WINAPI packet_processor(LPVOID arg)
     PWINDIVERT_UDPHDR udp_header;
     DWORD recv_fail_streak = 0;
 
-    while (running)
+    // Shutdown(RECV) stops new captures but leaves already queued packets readable.
+    // Drain through ERROR_NO_DATA even after a stop has been requested.
+    while (TRUE)
     {
         if (!WinDivertRecv(windivert_handle, packet, sizeof(packet), &packet_len, &addr))
         {
@@ -1347,21 +1349,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
         packet_thread[i] = CreateThread(NULL, 0, packet_processor, NULL, 0, NULL);
         if (packet_thread[i] == NULL)
         {
-            running = FALSE;
-            for (int j = 0; j < i; j++)
-            {
-                if (packet_thread[j] != NULL)
-                {
-                    WaitForSingleObject(packet_thread[j], 5000);
-                    CloseHandle(packet_thread[j]);
-                    packet_thread[j] = NULL;
-                }
-            }
-            WinDivertClose(windivert_handle);
-            windivert_handle = INVALID_HANDLE_VALUE;
-            WaitForSingleObject(proxy_thread, INFINITE);
-            CloseHandle(proxy_thread);
-            proxy_thread = NULL;
+            ProxyBridge_Stop();
             return FALSE;
         }
     }
@@ -1404,25 +1392,42 @@ PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
 
     running = FALSE;
 
-    sockmap_stop();
-
     if (windivert_handle != INVALID_HANDLE_VALUE)
     {
-        WinDivertShutdown(windivert_handle, WINDIVERT_SHUTDOWN_BOTH);
-        WinDivertClose(windivert_handle);
-        windivert_handle = INVALID_HANDLE_VALUE;
+        // Closing or disabling SEND here loses outside packets held by the worker.
+        // Keep PID lookup and injection alive until the receive queue is empty.
+        if (!WinDivertShutdown(windivert_handle, WINDIVERT_SHUTDOWN_RECV))
+        {
+            log_message("Capture receive shutdown failed (%lu); aborting capture", GetLastError());
+            WinDivertClose(windivert_handle);
+            windivert_handle = INVALID_HANDLE_VALUE;
+        }
     }
 
-    // process alll packets before we stop, make sure packets are not dropped
+    // A thread-creation failure can leave a live capture queue with no consumer.
+    BOOL have_packet_worker = FALSE;
+    for (int i = 0; i < NUM_PACKET_THREADS; i++)
+        if (packet_thread[i] != NULL) have_packet_worker = TRUE;
+    if (!have_packet_worker && windivert_handle != INVALID_HANDLE_VALUE)
+        packet_processor(NULL);
+
+    // Do not free flow state or close the injection handle underneath this loop.
     for (int i = 0; i < NUM_PACKET_THREADS; i++)
     {
         if (packet_thread[i] != NULL)
         {
-            WaitForSingleObject(packet_thread[i], 8000);  // generous: a thread outliving Stop would run code from an unloaded DLL
+            WaitForSingleObject(packet_thread[i], INFINITE);
             CloseHandle(packet_thread[i]);
             packet_thread[i] = NULL;
         }
     }
+
+    if (windivert_handle != INVALID_HANDLE_VALUE)
+    {
+        WinDivertClose(windivert_handle);
+        windivert_handle = INVALID_HANDLE_VALUE;
+    }
+    sockmap_stop();
 
     if (proxy_thread != NULL)
     {
