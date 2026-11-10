@@ -13,6 +13,12 @@ int wmain(int argc, wchar_t** argv) {
     wprintf(L"PID=%lu locale=%s region=%s geo=%ld timezone=%s dstDisabled=%u season=%lu localHour=%u utcHour=%u\n",
         GetCurrentProcessId(), locale, region, GetUserGeoID(GEOCLASS_NATION), tz.TimeZoneKeyName,
         tz.DynamicDaylightTimeDisabled, season, local.wHour, utc.wHour);
+    if (GetEnvironmentVariableW(L"REGION_PROBE_HOOK_PATH", nullptr, 0)) {
+        WCHAR module[32768] = {};
+        if (HMODULE hook = GetModuleHandleW(L"RegionHook.dll")) GetModuleFileNameW(hook, module, _countof(module));
+        char utf8[131072] = {}; WideCharToMultiByte(CP_UTF8, 0, module, -1, utf8, sizeof(utf8), nullptr, nullptr);
+        printf("HOOK_PATH=%s\n", utf8);
+    }
     SYSTEMTIME winter = {2026, 1, 0, 15, 12, 0, 0, 0}, summer = {2026, 7, 0, 15, 12, 0, 0, 0};
     SYSTEMTIME wlocal = {}, slocal = {}; SystemTimeToTzSpecificLocalTimeEx(&tz, &winter, &wlocal); SystemTimeToTzSpecificLocalTimeEx(&tz, &summer, &slocal);
     wprintf(L"winterHour=%u summerHour=%u\n", wlocal.wHour, slocal.wHour);
@@ -43,7 +49,22 @@ int wmain(int argc, wchar_t** argv) {
         cmd = L"\"" + std::wstring(self) + L"\" --network " + argv[2] + L" " + argv[3] + L" 2000";
     }
     STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
-    if (!CreateProcessW(self, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) { printf("CHILD_ERROR=%lu\n", GetLastError()); return 1; }
+    bool suspended = argc > 1 && !wcscmp(argv[1], L"--spawn-suspended");
+    bool ansi = argc > 1 && !wcscmp(argv[1], L"--spawn-ansi");
+    BOOL created;
+    if (ansi) {
+        char appA[32768], cmdA[32768];
+        WideCharToMultiByte(CP_ACP, 0, self, -1, appA, sizeof(appA), nullptr, nullptr);
+        WideCharToMultiByte(CP_ACP, 0, cmd.c_str(), -1, cmdA, sizeof(cmdA), nullptr, nullptr);
+        STARTUPINFOA sa = {sizeof(sa)};
+        created = CreateProcessA(appA, cmdA, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &sa, &pi);
+    } else created = CreateProcessW(self, cmd.data(), nullptr, nullptr, FALSE, suspended ? CREATE_SUSPENDED : 0, nullptr, nullptr, &si, &pi);
+    if (!created) { printf("CHILD_ERROR=%lu\n", GetLastError()); return 1; }
+    if (suspended) {
+        if (WaitForSingleObject(pi.hProcess, 200) != WAIT_TIMEOUT) return 7;
+        if (ResumeThread(pi.hThread) == DWORD(-1)) return 8;
+        printf("SUSPENDED_CHILD_OK\n");
+    }
     WaitForSingleObject(pi.hProcess, 10000); DWORD childExit = 0; GetExitCodeProcess(pi.hProcess, &childExit);
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess); if (childExit) return (int)childExit;
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", nullptr, 0)) {

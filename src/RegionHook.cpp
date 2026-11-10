@@ -5,6 +5,7 @@
 #include "detours.h"
 #include "UnifiedDns.h"
 #include "SystemProxy.h"
+#include "UnicodeInjection.h"
 
 static void (WINAPI *realEntry)();
 static void WINAPI unifiedEntry() {
@@ -18,7 +19,7 @@ static LCID lcid;
 static LANGID lang;
 static GEOID geo;
 static DYNAMIC_TIME_ZONE_INFORMATION zone;
-static char dllPath[MAX_PATH];
+static WCHAR dllPath[32768];
 static decltype(&GetLocaleInfoEx) realLocaleInfoEx = GetLocaleInfoEx;
 static decltype(&GetLocaleInfoW) realLocaleInfoW = GetLocaleInfoW;
 static decltype(&GetLocaleInfoA) realLocaleInfoA = GetLocaleInfoA;
@@ -128,29 +129,29 @@ static void WINAPI localTime(LPSYSTEMTIME out) {
     SYSTEMTIME utc; GetSystemTime(&utc);
     if (out) SystemTimeToTzSpecificLocalTimeEx(&zone, &utc, out);
 }
-// Child processes are instrumented before their first application instruction.
+// Child primary threads stay suspended until their runtime module is ready.
 // shortcut: service/COM broker activation is outside this process tree and requires app-specific integration.
 static BOOL WINAPI createW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
     BOOL inherit, DWORD flags, LPVOID env, LPCWSTR cwd, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi) {
-    return DetourCreateProcessWithDllExW(app, cmd, pa, ta, inherit, flags, env, cwd, si, pi, dllPath, realCreateW);
+    return FinishUnicodeChild(realCreateW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, pi), flags, pi, dllPath);
 }
 static BOOL WINAPI createA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
     BOOL inherit, DWORD flags, LPVOID env, LPCSTR cwd, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi) {
-    return DetourCreateProcessWithDllExA(app, cmd, pa, ta, inherit, flags, env, cwd, si, pi, dllPath, realCreateA);
+    return FinishUnicodeChild(realCreateA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, pi), flags, pi, dllPath);
 }
 extern "C" __declspec(dllexport) void RegionHookMarker() {}
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (DetourIsHelperProcess()) return TRUE;
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
-    DetourRestoreAfterWith();
     WCHAR tz[128] = {}, geoText[32] = {};
     if (!GetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", locale, _countof(locale)) ||
         !GetEnvironmentVariableW(L"REGION_LAUNCHER_TIMEZONE", tz, _countof(tz)) ||
         !GetEnvironmentVariableW(L"REGION_LAUNCHER_REGION", region, _countof(region)) ||
         !GetEnvironmentVariableW(L"REGION_LAUNCHER_GEO", geoText, _countof(geoText))) return FALSE;
     lcid = LocaleNameToLCID(locale, 0); lang = LANGIDFROMLCID(lcid); geo = _wtoi(geoText);
-    if (!lcid || !geo || !GetModuleFileNameA(instance, dllPath, _countof(dllPath))) return FALSE;
+    DWORD pathLength = GetModuleFileNameW(instance, dllPath, _countof(dllPath));
+    if (!lcid || !geo || !pathLength || pathLength >= _countof(dllPath)) return FALSE;
     bool found = false;
     for (DWORD i = 0; EnumDynamicTimeZoneInformation(i, &zone) == ERROR_SUCCESS; ++i) {
         if (!_wcsicmp(zone.TimeZoneKeyName, tz)) { found = true; break; }

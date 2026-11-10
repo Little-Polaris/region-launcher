@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <string>
 #include <vector>
-#include "detours.h"
 #include "NetworkProtocol.h"
+#include "UnicodeInjection.h"
 
 static HANDLE sessionJob;
 static std::wstring cfg;
@@ -146,9 +146,6 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
         DWORD wait = WaitForMultipleObjects(owner ? 3 : 2, waits, FALSE, 30000);
         if (wait != WAIT_OBJECT_0) { requestStop(); SetLastError(wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : ERROR_NOT_READY); return error(L"Network engine not ready or launcher closed; application was not started. See the installed service logs/network.log"); }
     }
-    auto dll = utf8(directory() + L"\\RegionHook.dll");
-    // Detours uses ANSI paths for its import; require an ASCII deployment path for a predictable import.
-    for (unsigned char c : dll) if (c >= 128) { requestStop(); SetLastError(ERROR_INVALID_NAME); return error(L"Move launcher to a path containing only English characters"); }
     auto command = quote(app) + L" " + get(L"Arguments");
     auto cwd = get(L"WorkingDirectory"); if (cwd.empty()) cwd = app.substr(0, app.find_last_of(L"\\/"));
     STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
@@ -160,18 +157,25 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
             DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &stdCopies[i], 0, TRUE, DUPLICATE_SAME_ACCESS);
     }
     si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = stdCopies[0]; si.hStdOutput = stdCopies[1]; si.hStdError = stdCopies[2];
-    BOOL created = inject ? DetourCreateProcessWithDllExW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
-        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi, dll.c_str(), nullptr) :
-        CreateProcessW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
+    BOOL created = CreateProcessW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
         CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi);
     DWORD createError = GetLastError();
     for (HANDLE handle : stdCopies) if (handle) CloseHandle(handle);
     SetLastError(createError);
     if (!created) { requestStop(); return error(L"Could not prepare application with locale module"); }
+    auto abortApplication = [&](const WCHAR* reason) {
+        DWORD failure = GetLastError(); TerminateProcess(pi.hProcess, failure); WaitForSingleObject(pi.hProcess, 5000);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess); requestStop(); SetLastError(failure);
+        return error(reason);
+    };
     if (!AssignProcessToJobObject(sessionJob, pi.hProcess)) {
-        TerminateProcess(pi.hProcess, 1); requestStop(); return error(L"Could not enroll application; it was not resumed");
+        return abortApplication(L"Could not enroll application; it was not resumed");
     }
-    ResumeThread(pi.hThread); CloseHandle(pi.hThread);
+    if (inject && !InjectUnicodeDll(pi.hProcess, directory() + L"\\RegionHook.dll")) {
+        return abortApplication(L"Could not load the Unicode runtime module; application main thread was not resumed");
+    }
+    if (ResumeThread(pi.hThread) == DWORD(-1)) return abortApplication(L"Could not resume application");
+    CloseHandle(pi.hThread);
     wprintf(L"STARTED PID=%lu\n", pi.dwProcessId); fflush(stdout);
     DWORD rootExit = STILL_ACTIVE;
     if (joining) {

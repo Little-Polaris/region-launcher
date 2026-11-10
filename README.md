@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.4
+# Region Launcher 0.3.0-alpha.5
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.5 改为 UTF-16 路径加载运行环境 DLL，支持启动器目录含中文、日文及 emoji；父子进程共用同一加载实现。验证和初始化时机的边界见 [Unicode 路径验证](docs/validation-unicode-20261110.md)。
 
 0.3.0-alpha.4 支持机场订阅链接、多节点列表、筛选和手动更新。入口：“独立代理配置…” → “机场订阅 / 选节点…”。支持 Clash/Mihomo YAML、JSON、Base64 及常见分享链接列表；选中节点后校验并保存。见 [订阅使用说明](docs/subscriptions.md)。
 
@@ -12,7 +14,7 @@ Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 D
 
 ## 统一运行路径
 
-1. 暂停创建目标进程，将它加入 Windows Job Object，准备网络引擎后再恢复执行。
+1. 先准备网络引擎，再暂停创建目标进程并加入 Windows Job Object；通过 UTF-16 路径加载公共接口模块，成功后恢复主线程。
 2. TCP、UDP 按进程组匹配。同一可执行文件在组外运行时不匹配这些代理规则。
 3. IPv4 连接交给独立 Mihomo/SOCKS5 通道，所有目标经同一个固定节点。
 4. Windows DNS 接口明确使用专用解析服务器。异步查询保留回调、取消和 Windows 内存释放接口。组内直接发送的 UDP/TCP 53 数据包统一转交专用解析器。
@@ -46,6 +48,7 @@ pwsh -NoProfile -File scripts/build.ps1 -BinDirectory ./build/service-bin
 $env:REGION_TEST_BIN = (Resolve-Path ./build/service-bin).Path
 python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py
+python -X utf8 tests/test_unicode_paths.py --network
 python -X utf8 tests/test_private_proxy.py
 pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/service-bin
 ```
@@ -59,6 +62,7 @@ pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/service-b
 ## 边界
 
 - Windows 11 x64 本机原型；x86、受保护进程、额外代码完整性限制和部分 MSIX 应用尚未覆盖。
+- Unicode 加载会触发 Windows 加载器初始化，依赖 DLL 的初始化函数及 TLS 回调可能早于公共接口模块运行。进程已在网络组内，但这些早期代码的 DNS、代理和地区接口接管未验收；主线程保持暂停不代表所有初始化代码尚未执行。
 - 外部已有单实例进程、系统服务、COM 激活和默认浏览器回调可能不属于新进程组。完整软件会话隔离仍需继续实现和验证。
 - 应用显式指定的代理、自行读取注册表的代理实现和外部本地转发服务不属于“继承系统默认代理”修复的覆盖范围；公共接口检查不能证明所有本地代发路径均已隔离。
 - 自带加密 DNS 的应用，其网络连接受统一代理规则处理，但解析器选择与 AAAA 回答不一定经过 Windows DNS 接口。
