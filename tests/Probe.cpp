@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mswsock.h>
 #include <windows.h>
 #include <stdio.h>
 #include <string>
@@ -29,14 +30,72 @@ int wmain(int argc, wchar_t** argv) {
     wprintf(L"spring=%u:%02u>%u:%02u fall=%u:%02u>%u:%02u\n", a.wHour, a.wMinute, b.wHour, b.wMinute, c.wHour, c.wMinute, d.wHour, d.wMinute);
     if (argc > 1 && !wcscmp(argv[1], L"--child")) return 0;
     if (argc > 1 && !wcscmp(argv[1], L"--hold")) { fflush(stdout); Sleep(15000); return 0; }
-    if (argc > 1 && (!wcscmp(argv[1], L"--network") || !wcscmp(argv[1], L"--udp")) && argc >= 4) {
+    if (argc >= 4 && !wcscmp(argv[1], L"--stun")) {
+        WSADATA data; WSAStartup(MAKEWORD(2, 2), &data);
+        SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0); DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+        sockaddr_in target = {}; target.sin_family = AF_INET; target.sin_port = htons((USHORT)_wtoi(argv[3]));
+        InetPtonW(AF_INET, argv[2], &target.sin_addr);
+        BYTE request[20] = {0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42};
+        ULONGLONG tick = GetTickCount64(); DWORD pid = GetCurrentProcessId();
+        memcpy(request + 8, &tick, 8); memcpy(request + 16, &pid, 4);
+        bool connected = argc > 4 && !wcscmp(argv[4], L"connected");
+        int sent = connected ? (connect(sock, (sockaddr*)&target, sizeof(target)) ? -1 : send(sock, (char*)request, 20, 0)) :
+            sendto(sock, (char*)request, 20, 0, (sockaddr*)&target, sizeof(target));
+        BYTE reply[1024]; int size = sent == 20 ? recv(sock, (char*)reply, sizeof(reply), 0) : -1;
+        int result = 3;
+        if (size >= 20 && !memcmp(reply + 4, request + 4, 16)) {
+            for (int pos = 20; pos + 4 <= size;) {
+                int type = (reply[pos] << 8) | reply[pos + 1], length = (reply[pos + 2] << 8) | reply[pos + 3];
+                if (pos + 4 + length > size) break;
+                if (type == 0x20 && length >= 8 && reply[pos + 5] == 1) {
+                    BYTE* ip = reply + pos + 8;
+                    printf("STUN_EXIT=%u.%u.%u.%u\n", ip[0]^0x21, ip[1]^0x12, ip[2]^0xa4, ip[3]^0x42); result = 0; break;
+                }
+                pos += 4 + ((length + 3) & ~3);
+            }
+        }
+        if (result) printf("STUN_ERROR=%d\n", WSAGetLastError());
+        closesocket(sock); WSACleanup(); return result;
+    }
+    if (argc > 1 && (!wcscmp(argv[1], L"--network") || !wcscmp(argv[1], L"--udp") || !wcscmp(argv[1], L"--connectex") || !wcscmp(argv[1], L"--wsaconnect") || !wcscmp(argv[1], L"--nonblocking")) && argc >= 4) {
         Sleep(1000);
         WSADATA data; WSAStartup(MAKEWORD(2, 2), &data);
         bool udp = !wcscmp(argv[1], L"--udp");
         SOCKET sock = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0); DWORD timeout = 3000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
         sockaddr_in target = {}; target.sin_family = AF_INET; target.sin_port = htons((u_short)_wtoi(argv[3])); InetPtonW(AF_INET, argv[2], &target.sin_addr);
-        int status = connect(sock, (sockaddr*)&target, sizeof(target));
+        int status;
+        if (!wcscmp(argv[1], L"--connectex")) {
+            sockaddr_in local = {}; local.sin_family = AF_INET; bind(sock, (sockaddr*)&local, sizeof(local));
+            GUID id = WSAID_CONNECTEX; LPFN_CONNECTEX fn = nullptr; DWORD bytes = 0;
+            status = WSAIoctl(sock, SIO_GET_EXTENSION_FUNCTION_POINTER, &id, sizeof(id), &fn, sizeof(fn), &bytes, nullptr, nullptr);
+            OVERLAPPED ov = {}; ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!status) {
+                BOOL ok = fn(sock, (sockaddr*)&target, sizeof(target), nullptr, 0, nullptr, &ov);
+                if (!ok && WSAGetLastError() == WSA_IO_PENDING) {
+                    DWORD flags = 0; ok = WaitForSingleObject(ov.hEvent, 5000) == WAIT_OBJECT_0 && WSAGetOverlappedResult(sock, &ov, &bytes, FALSE, &flags);
+                }
+                status = ok ? 0 : -1;
+                if (ok) setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0);
+            }
+            CloseHandle(ov.hEvent);
+        } else if (!wcscmp(argv[1], L"--wsaconnect")) status = WSAConnect(sock, (sockaddr*)&target, sizeof(target), nullptr, nullptr, nullptr, nullptr);
+        else if (!wcscmp(argv[1], L"--nonblocking")) {
+            u_long mode = 1; ioctlsocket(sock, FIONBIO, &mode);
+            status = connect(sock, (sockaddr*)&target, sizeof(target));
+            if (status && WSAGetLastError() == WSAEWOULDBLOCK) {
+                fd_set writes; FD_ZERO(&writes); FD_SET(sock, &writes); timeval limit = {5, 0};
+                status = select(0, nullptr, &writes, nullptr, &limit) > 0 ? 0 : -1;
+            }
+            mode = 0; ioctlsocket(sock, FIONBIO, &mode);
+        } else status = connect(sock, (sockaddr*)&target, sizeof(target));
+        if (!status && !udp) {
+            sockaddr_in peer = {}; int length = sizeof(peer);
+            if (getpeername(sock, (sockaddr*)&peer, &length) || peer.sin_addr.s_addr != target.sin_addr.s_addr || peer.sin_port != target.sin_port) {
+                printf("PEER_MISMATCH\n"); status = -1;
+            }
+        }
         if (status == 0) { send(sock, "probe", 5, 0); char reply[256] = {}; int n = recv(sock, reply, sizeof(reply)-1, 0); if (n > 0) printf("NETWORK=%s\n", reply); else { printf("NETWORK_ERROR=%d\n", WSAGetLastError()); status = -1; } }
         else printf("CONNECT_ERROR=%d\n", WSAGetLastError());
         closesocket(sock); WSACleanup();

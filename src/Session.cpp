@@ -8,6 +8,7 @@
 #include <vector>
 #include "NetworkProtocol.h"
 #include "UnicodeInjection.h"
+#include "ConnectBroker.h"
 
 static HANDLE sessionJob;
 static std::wstring cfg;
@@ -118,6 +119,7 @@ static bool configureEnvironment() {
     return true;
 }
 static int run(bool localeOnly, bool joining = false, bool inject = true) {
+    struct BrokerCleanup { ~BrokerCleanup() { StopConnectBroker(); } } brokerCleanup;
     auto app = get(L"Application"); if (!x64Image(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"This build requires an x64 Windows executable"); }
     if (!configureEnvironment()) return error(L"Invalid Windows country, language or time zone settings");
     SetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", localeOnly ? nullptr : L"1");
@@ -146,6 +148,13 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
         DWORD wait = WaitForMultipleObjects(owner ? 3 : 2, waits, FALSE, 30000);
         if (wait != WAIT_OBJECT_0) { requestStop(); SetLastError(wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : ERROR_NOT_READY); return error(L"Network engine not ready or launcher closed; application was not started. See the installed service logs/network.log"); }
     }
+    if (!localeOnly && inject) {
+        auto pipe = ConnectPipe(name);
+        if (!joining && !StartConnectBroker(pipe, sessionJob, (USHORT)wcstoul(get(L"ProxyPort", L"7890").c_str(), nullptr, 10))) {
+            requestStop(); return error(L"Cannot start private connection broker; application was not started");
+        }
+        SetEnvironmentVariableW(L"REGION_LAUNCHER_CONNECT_PIPE", pipe.c_str());
+    } else SetEnvironmentVariableW(L"REGION_LAUNCHER_CONNECT_PIPE", nullptr);
     auto command = quote(app) + L" " + get(L"Arguments");
     auto cwd = get(L"WorkingDirectory"); if (cwd.empty()) cwd = app.substr(0, app.find_last_of(L"\\/"));
     STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
@@ -189,6 +198,7 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
     }
     GetExitCodeProcess(pi.hProcess, &rootExit); requestStop();
     if (engine) { WaitForSingleObject(engine, 10000); CloseHandle(engine); }
+    StopConnectBroker();
     CloseHandle(pi.hProcess); CloseHandle(sessionJob); CloseHandle(ready); CloseHandle(stop);
     if (owner) CloseHandle(owner);
     return rootExit == STILL_ACTIVE ? 1 : (int)rootExit;
