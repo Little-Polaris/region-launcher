@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>RegionLauncher</AssemblyName>
-    <Version>0.3.0-alpha.2</Version>
+    <Version>0.3.0-alpha.3</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 </Project>

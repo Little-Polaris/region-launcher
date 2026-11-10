@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.2
+# Region Launcher 0.3.0-alpha.3
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.3 增加“独立代理配置”窗口：Hysteria2、VLESS、VMess、Trojan、Shadowsocks、TUIC、AnyTLS 表单，单节点 JSON 导入、高级节点参数、内核校验及保存前备份。运行期间锁定配置。使用步骤与验证边界见 [代理配置](docs/proxy-settings.md)。本版未更改网络后台或驱动，已安装 alpha.2 后台的本机无须重装。
 
 0.3.0-alpha.2 修复了退出时提前关闭网络句柄、可能丢失环境外数据包的问题。本机后台已更新，12 轮启停期间 6466 次外部通信均成功，宿主网络设置和外部代理进程保持一致，五组通用网络回归通过。见 [启停修复验收](docs/validation-lifecycle-20261109.md) 和 [使用方法](docs/quick-start.md)。
 

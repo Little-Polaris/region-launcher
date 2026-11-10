@@ -3,8 +3,8 @@
 1. 将 ZIP 完整解压到可写、路径仅含英文字符的目录；不要在压缩包内直接运行。
 2. 双击 app/RegionLauncher.exe。需要 .NET 10 Desktop Runtime x64；当前这台电脑已安装。
 3. 本机后台已更新为本次修复版，无须重复安装。其他电脑首次使用、或仍使用旧后台时，运行根目录“安装或更新后台服务.cmd”并完成 Windows 管理员确认。
-4. 包内提供代理内核，但不包含节点密码、浏览器登录信息或个人资料。联网前需要 app/data/private/proxy.json 中的独立代理配置；目前界面没有节点导入功能。
-5. 本机另行解压使用时，可将原 outputs/region-launcher-unified/app/data/private/proxy.json 复制到新目录的 app/data/private/proxy.json；也可复制原 app/data/profile.json 以保留程序、参数和地区选项。保留原文件，这些私人配置不要发给他人。
+4. 点击“独立代理配置…”，选择协议并填写节点，点击“校验并保存”。支持 Hysteria2、VLESS、VMess、Trojan、Shadowsocks、TUIC 和 AnyTLS。包内提供代理内核，但不包含节点密码、浏览器登录信息或个人资料。
+5. 已有节点可在该窗口点击“导入 JSON…”，选择原 outputs/region-launcher-unified/app/data/private/proxy.json，然后校验并保存。也可复制原 app/data/profile.json 以保留程序、参数和地区选项。保留原文件，这些私人配置不要发给他人。更多参数见 [代理配置](proxy-settings.md)。
 6. 原浏览器副本仍留在原启动器目录。其启动参数包含原副本的绝对路径，移动整个项目后需在启动器内调整该路径。
 7. 同时只运行一个环境。先选程序、国家、语言、时区和自动冬夏时间，再启动。停止环境前保存其中应用的文件。
 

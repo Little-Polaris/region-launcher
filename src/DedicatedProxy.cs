@@ -7,6 +7,8 @@ using System.Text.Json;
 sealed class DedicatedProxy : IDisposable
 {
     readonly string config = Path.Combine(AppContext.BaseDirectory, "data", "private", "proxy.json");
+    public string ConfigPath => config;
+    public string EnginePath => Path.Combine(AppContext.BaseDirectory, "proxy", "mihomo.exe");
     Process? process;
     readonly SemaphoreSlim gate = new(1);
     public bool Configured => File.Exists(config);
@@ -35,8 +37,7 @@ sealed class DedicatedProxy : IDisposable
             // Refuse to reuse an unrelated service on the dedicated port.
             var probe = new TcpListener(IPAddress.Loopback, Port);
             try { probe.Start(); } finally { probe.Stop(); }
-            string engine = Path.Combine(AppContext.BaseDirectory, "proxy", "mihomo.exe");
-            var psi = new ProcessStartInfo(engine) { UseShellExecute = false, CreateNoWindow = true };
+            var psi = new ProcessStartInfo(EnginePath) { UseShellExecute = false, CreateNoWindow = true };
             psi.ArgumentList.Add("-d"); psi.ArgumentList.Add(Path.GetDirectoryName(config)!);
             psi.ArgumentList.Add("-f"); psi.ArgumentList.Add(config);
             process?.Dispose();

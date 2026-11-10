@@ -15,6 +15,7 @@ with zipfile.ZipFile(args.archive) as archive:
         'app/RegionLauncher.deps.json', 'app/RegionLauncher.runtimeconfig.json',
         'app/proxy/mihomo.exe', 'app/proxy/LICENSE', 'docs/quick-start.md',
         'docs/validation-lifecycle-20261109.md',
+        'docs/proxy-settings.md',
         'app/RegionSession.exe', 'app/RegionHook.dll', 'install/request_install.ps1',
         'install/package/install_service.ps1', 'install/package/RegionNetworkService.exe',
         'install/package/ProxyBridgeCore.dll', 'install/package/WinDivert.dll',
