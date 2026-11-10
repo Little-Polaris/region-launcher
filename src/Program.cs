@@ -48,7 +48,6 @@ sealed class Launcher : Form
     readonly Button stop = new() { Text = "结束本次运行", Enabled = false, AutoSize = true };
     readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
     readonly Button checkProxy = new() { Text = "检测代理", AutoSize = true };
-    readonly Button joinButton = new() { Text = "加入所选程序", AutoSize = true };
     bool preparing;
     readonly string data = Path.Combine(AppContext.BaseDirectory, "data");
     readonly DedicatedProxy dedicatedProxy = new();
@@ -99,7 +98,6 @@ sealed class Launcher : Form
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start); buttons.Controls.Add(stop);
         var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => { executable.Text = Path.Combine(AppContext.BaseDirectory, "RegionProbe.exe"); arguments.Text = ""; };
         buttons.Controls.Add(probe); grid.Controls.Add(buttons, 0, 11); grid.SetColumnSpan(buttons, 3);
-        joinButton.Click += async (_, _) => await StartSession(session != null); buttons.Controls.Add(joinButton);
         grid.Controls.Add(log, 0, 12); grid.SetColumnSpan(log, 3); Controls.Add(grid);
         ApplySettings(new Profile());
         start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
@@ -131,10 +129,9 @@ sealed class Launcher : Form
     }
     void UpdateActions()
     {
-        start.Enabled = session == null && !preparing;
+        start.Enabled = !preparing;
         stop.Enabled = session != null;
         configureProxy.Enabled = checkProxy.Enabled = session == null && !preparing;
-        joinButton.Enabled = !preparing;
     }
     void ApplySettings(Profile profile)
     {
@@ -162,9 +159,10 @@ sealed class Launcher : Form
         byte[] answer = new byte[2]; await stream.ReadExactlyAsync(answer, cts.Token);
         if (answer[0] != 5 || answer[1] != 0) throw new IOException("此版本需要无需认证的 SOCKS5 代理。");
     }
-    async Task StartSession(bool join = false)
+    async Task StartSession()
     {
-        if (preparing || session != null && !join) return;
+        if (preparing) return;
+        bool join = session != null;
         preparing = true; UpdateActions();
         try
         {
@@ -186,19 +184,20 @@ sealed class Launcher : Form
             File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
             var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "RegionSession.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             psi.ArgumentList.Add(join ? "--join" : "--run"); psi.ArgumentList.Add(config);
-            var candidate = new Process { StartInfo = psi }; candidate.OutputDataReceived += (_, e) => { if (e.Data != null) Append(e.Data); }; candidate.ErrorDataReceived += (_, e) => { if (e.Data != null) Append(e.Data); };
+            var candidate = new Process { StartInfo = psi };
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
+            Task logs = Task.WhenAll(ProcessLog.ReadAsync(candidate.StandardOutput.BaseStream, Append), ProcessLog.ReadAsync(candidate.StandardError.BaseStream, Append));
             if (join)
             {
                 preparing = false; UpdateActions();
-                using (candidate) { candidate.BeginOutputReadLine(); candidate.BeginErrorReadLine(); await candidate.WaitForExitAsync(); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
+                using (candidate) { await candidate.WaitForExitAsync(); await logs; Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
-            session = candidate; session.BeginOutputReadLine(); session.BeginErrorReadLine(); stop.Enabled = true;
+            session = candidate; stop.Enabled = true;
             preparing = false; UpdateActions();
             proxyHost.Enabled = proxyPort.Enabled = dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = false;
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
-            await session.WaitForExitAsync(); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
+            await session.WaitForExitAsync(); await logs; Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) { Append("未启动或运行失败：" + ex.Message); if (session is { HasExited: true }) { session.Dispose(); session = null; } }
         finally { preparing = false; UpdateActions(); dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = session == null; }

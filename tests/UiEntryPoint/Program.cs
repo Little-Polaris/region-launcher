@@ -31,6 +31,21 @@ var ui = new Thread(() =>
         var language = (System.Windows.Forms.ComboBox)form.GetType().GetField("language", flags)!.GetValue(form)!;
         var zone = (System.Windows.Forms.ComboBox)form.GetType().GetField("timeZone", flags)!.GetValue(form)!;
         var dst = (System.Windows.Forms.CheckBox)form.GetType().GetField("dst", flags)!.GetValue(form)!;
+        var start = (System.Windows.Forms.Button)form.GetType().GetField("start", flags)!.GetValue(form)!;
+        var stop = (System.Windows.Forms.Button)form.GetType().GetField("stop", flags)!.GetValue(form)!;
+        if (start.Parent!.Controls.Cast<System.Windows.Forms.Control>().Count(c => c.Text.Contains("所选程序")) != 1)
+            throw new Exception("Expected one program launch button");
+        var update = form.GetType().GetMethod("UpdateActions", flags)!;
+        var session = form.GetType().GetField("session", flags)!;
+        var preparing = form.GetType().GetField("preparing", flags)!;
+        update.Invoke(form, null);
+        if (!start.Enabled || stop.Enabled) throw new Exception("Idle launch state incorrect");
+        using var dummySession = new System.Diagnostics.Process();
+        session.SetValue(form, dummySession); update.Invoke(form, null);
+        if (!start.Enabled || !stop.Enabled) throw new Exception("Existing environment must accept another program");
+        preparing.SetValue(form, true); update.Invoke(form, null);
+        if (start.Enabled) throw new Exception("Preparing must prevent repeated launches");
+        session.SetValue(form, null); preparing.SetValue(form, false); update.Invoke(form, null);
         // Showing the form must not reset explicitly selected defaults to the
         // first alphabetic item, regardless of a saved user profile.
         if ((int)country.SelectedItem!.GetType().GetProperty("GeoId")!.GetValue(country.SelectedItem)! != 244 ||
@@ -44,3 +59,4 @@ var ui = new Thread(() =>
 ui.SetApartmentState(ApartmentState.STA); ui.Start(); ui.Join();
 if (uiFailure != null) throw uiFailure;
 Console.WriteLine("PASS: displayed form retains US/en-US/Pacific and automatic DST.");
+Console.WriteLine("PASS: single launch button is available both idle and running; disabled while preparing.");
