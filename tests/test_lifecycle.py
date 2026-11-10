@@ -42,6 +42,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cycles', type=int, default=12)
     parser.add_argument('--online', action='store_true')
+    parser.add_argument('--https-host', default='www.baidu.com', help='HTTPS witness hostname (certificate validation stays enabled)')
+    parser.add_argument('--https-path', default='/')
     parser.add_argument('--selftest', action='store_true')
     parser.add_argument('--observe-seconds', type=float, default=1,
                         help='Outside-only observation duration when --selftest is used')
@@ -137,15 +139,15 @@ def main():
         # Only this probe explicitly uses the existing proxy; no user setting changes.
         https = http.client.HTTPSConnection('127.0.0.1', 7890, timeout=12,
                                             context=ssl.create_default_context())
-        https.set_tunnel('www.baidu.com', 443)
+        https.set_tunnel(args.https_host, 443)
         def persistent_https():
-            https.request('GET', '/', headers={'Connection': 'keep-alive'})
+            https.request('GET', args.https_path, headers={'Connection': 'keep-alive'})
             response = https.getresponse()
             body = response.read()
             assert response.status == 200 and body, response.status
         def new_https():
             p = subprocess.run(['curl.exe', '-sSf', '--proxy', 'http://127.0.0.1:7890',
-                                '--max-time', '12', 'https://www.baidu.com/'],
+                                '--max-time', '12', 'https://'+args.https_host+args.https_path],
                                capture_output=True, timeout=15)
             assert p.returncode == 0 and p.stdout, p.stderr.decode(errors='replace')
         monitors += [('proxy-https-keepalive', persistent_https, .25),
