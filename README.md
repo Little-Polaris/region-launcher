@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.6
+# Region Launcher 0.3.0-alpha.7
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.7 增加可保存的软件列表：下拉选择软件，界面添加、编辑、删除名称、程序路径和启动参数；重启保留上次选择，旧版程序配置自动迁入。配置格式见 [软件列表](docs/applications.md)。
 
 0.3.0-alpha.6 合并为一个“启动所选程序”按钮：首次创建环境，后续自动加入当前环境。程序日志优先按 UTF-8 解码，遇到无效 UTF-8 时按 Windows 本地代码页解码，修复中文日志乱码。
 
@@ -49,6 +51,7 @@ Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 D
 pwsh -NoProfile -File scripts/build.ps1 -BinDirectory ./build/service-bin
 $env:REGION_TEST_BIN = (Resolve-Path ./build/service-bin).Path
 dotnet run --project tests/ProcessLogs/ProcessLogs.csproj -c Release
+dotnet run --project tests/ApplicationLibrary/ApplicationLibrary.csproj -c Release -- ./build/test-results/application-library
 dotnet run --project tests/UiEntryPoint/UiEntryPoint.csproj -c Release -- (Resolve-Path ./build/service-bin/RegionLauncher.dll).Path
 python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py

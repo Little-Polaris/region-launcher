@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 
 var entry = Assembly.LoadFrom(Path.GetFullPath(args[0])).EntryPoint
     ?? throw new Exception("Missing application entry point");
@@ -17,16 +18,62 @@ var pacific = zones.Single(z => z.Id == "Pacific Standard Time");
 if (pacific.GetUtcOffset(new DateTime(2026,1,15)) != TimeSpan.FromHours(-8) || pacific.GetUtcOffset(new DateTime(2026,7,15)) != TimeSpan.FromHours(-7)) throw new Exception("Pacific DST rules mismatch");
 Console.WriteLine($"PASS: Windows catalog: {regions.Count} countries, {languages.Count} languages, {zones.Count} time zones; US/en-US/Pacific DST available.");
 Exception uiFailure = null;
+var fixture = Path.Combine(AppContext.BaseDirectory, "test-data", Guid.NewGuid().ToString("N"));
+void Snapshot(System.Windows.Forms.Form form, string name) {
+    if (args.Length < 2) return;
+    Directory.CreateDirectory(args[1]);
+    using var bitmap = new System.Drawing.Bitmap(form.Width, form.Height);
+    form.DrawToBitmap(bitmap, new System.Drawing.Rectangle(System.Drawing.Point.Empty, bitmap.Size));
+    bitmap.Save(Path.Combine(args[1], name));
+}
+Directory.CreateDirectory(fixture);
+File.WriteAllText(Path.Combine(fixture, "profile.json"), JsonSerializer.Serialize(new { Application = Environment.ProcessPath!, Arguments = "--legacy=\"中文 参数\"" }));
+object OpenLauncher() => Activator.CreateInstance(assembly.GetType("Launcher")!, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { fixture }, null)!;
 var ui = new Thread(() =>
 {
     try
     {
-        using var form = (System.Windows.Forms.Form)Activator.CreateInstance(assembly.GetType("Launcher")!, true)!;
+        using var form = (System.Windows.Forms.Form)OpenLauncher();
         form.GetType().GetMethod("ApplySettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new[] { Activator.CreateInstance(assembly.GetType("Profile")!, true) });
         form.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
         form.Location = new System.Drawing.Point(-32000, -32000); form.ShowInTaskbar = false;
         form.Show(); System.Windows.Forms.Application.DoEvents();
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var software = (System.Windows.Forms.ComboBox)form.GetType().GetField("software", flags)!.GetValue(form)!;
+        var executable = (System.Windows.Forms.TextBox)form.GetType().GetField("executable", flags)!.GetValue(form)!;
+        var arguments = (System.Windows.Forms.TextBox)form.GetType().GetField("arguments", flags)!.GetValue(form)!;
+        if (software.Items.Count != 1 || arguments.Text != "--legacy=\"中文 参数\"" || !executable.ReadOnly || !arguments.ReadOnly)
+            throw new Exception("Legacy app did not populate selection and details");
+        var editorType = assembly.GetType("ApplicationEditor")!;
+        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null })!) {
+            editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
+            editor.Show(); System.Windows.Forms.Application.DoEvents();
+            ((System.Windows.Forms.TextBox)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "第二个软件 🚀";
+            ((System.Windows.Forms.TextBox)editorType.GetField("executable", flags)!.GetValue(editor)!).Text = Environment.ProcessPath!;
+            ((System.Windows.Forms.TextBox)editorType.GetField("arguments", flags)!.GetValue(editor)!).Text = "--second=\"两个 参数\"";
+            Snapshot(editor, "software-editor.png");
+            ((System.Windows.Forms.Button)editorType.GetField("save", flags)!.GetValue(editor)!).PerformClick();
+            if (editor.DialogResult != System.Windows.Forms.DialogResult.OK) throw new Exception("Software editor did not save");
+            var item = editorType.GetProperty("Entry")!.GetValue(editor)!;
+            form.GetType().GetMethod("SaveSoftware", flags)!.Invoke(form, new[] { item });
+        }
+        if (software.Items.Count != 2 || arguments.Text != "--second=\"两个 参数\"") throw new Exception("Added software not selected");
+        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new[] { software.SelectedItem! })!) {
+            editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
+            editor.Show(); System.Windows.Forms.Application.DoEvents();
+            ((System.Windows.Forms.TextBox)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "编辑后的软件";
+            ((System.Windows.Forms.Button)editorType.GetField("save", flags)!.GetValue(editor)!).PerformClick();
+            form.GetType().GetMethod("SaveSoftware", flags)!.Invoke(form, new[] { editorType.GetProperty("Entry")!.GetValue(editor)! });
+            if (software.Items.Count != 2 || software.SelectedItem!.ToString() != "编辑后的软件" || arguments.Text != "--second=\"两个 参数\"")
+                throw new Exception("Editor duplicated entry or lost arguments");
+        }
+        Snapshot(form, "software-launcher.png");
+        software.SelectedIndex = 0;
+        if (arguments.Text != "--legacy=\"中文 参数\"") throw new Exception("Selection used another software's arguments");
+        using (var reopened = (System.Windows.Forms.Form)OpenLauncher()) {
+            var selected = (System.Windows.Forms.ComboBox)reopened.GetType().GetField("software", flags)!.GetValue(reopened)!;
+            if (selected.Items.Count != 2 || selected.SelectedIndex != 0) throw new Exception("Software selection not restored on reopen");
+        }
         var country = (System.Windows.Forms.ComboBox)form.GetType().GetField("country", flags)!.GetValue(form)!;
         var language = (System.Windows.Forms.ComboBox)form.GetType().GetField("language", flags)!.GetValue(form)!;
         var zone = (System.Windows.Forms.ComboBox)form.GetType().GetField("timeZone", flags)!.GetValue(form)!;
@@ -52,11 +99,25 @@ var ui = new Thread(() =>
             (string)language.SelectedItem!.GetType().GetProperty("Name")!.GetValue(language.SelectedItem)! != "en-US" ||
             ((TimeZoneInfo)zone.SelectedItem!).Id != "Pacific Standard Time" || !dst.Checked)
             throw new Exception("Shown form lost the US/en-US/Pacific automatic-DST selections");
+        var empty = Activator.CreateInstance(assembly.GetType("ApplicationList")!)!;
+        form.GetType().GetMethod("SaveSoftwareList", flags)!.Invoke(form, new[] { empty });
+        if (start.Enabled || software.Items.Count != 0 || executable.Text != "" || arguments.Text != "")
+            throw new Exception("Deleting all software left a stale launch target");
         form.Close();
+        File.WriteAllText(Path.Combine(fixture, "applications.json"), "{malformed");
+        using var broken = (System.Windows.Forms.Form)OpenLauncher();
+        if (((System.Windows.Forms.Button)broken.GetType().GetField("start", flags)!.GetValue(broken)!).Enabled ||
+            ((System.Windows.Forms.Button)broken.GetType().GetField("addSoftware", flags)!.GetValue(broken)!).Enabled ||
+            File.ReadAllText(Path.Combine(fixture, "applications.json")) != "{malformed")
+            throw new Exception("Malformed list was enabled or overwritten");
     }
     catch (Exception ex) { uiFailure = ex; }
 });
 ui.SetApartmentState(ApartmentState.STA); ui.Start(); ui.Join();
 if (uiFailure != null) throw uiFailure;
+var fixtureRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "test-data")) + Path.DirectorySeparatorChar;
+if (!Path.GetFullPath(fixture).StartsWith(fixtureRoot, StringComparison.OrdinalIgnoreCase)) throw new Exception("Unexpected test directory");
+Directory.Delete(fixture, true);
 Console.WriteLine("PASS: displayed form retains US/en-US/Pacific and automatic DST.");
 Console.WriteLine("PASS: single launch button is available both idle and running; disabled while preparing.");
+Console.WriteLine("PASS: software migration, add/edit dialogs, dropdown parameter switching, remembered selection, empty and malformed lists.");
