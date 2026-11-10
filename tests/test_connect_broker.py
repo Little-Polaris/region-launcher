@@ -74,7 +74,7 @@ def main():
         output = (p.stdout+p.stderr).decode('utf-8', errors='replace')
         (OUT/'socket-semantics.log').write_text(output, encoding='utf-8')
         assert p.returncode == 0 and 'SOCKET_SEMANTICS_OK' in output, output
-        assert len(requests) == 53 and not errors, (len(requests), errors)
+        assert len(requests) == 55 and not errors, (len(requests), errors)
         # A usable direct target exists. Losing SOCKS must not fall back to it.
         direct = socket.socket()
         host = socket.gethostbyname(socket.gethostname())

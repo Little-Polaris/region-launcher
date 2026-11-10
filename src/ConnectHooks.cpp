@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <mswsock.h>
 #include <windows.h>
+#include <iphlpapi.h>
 #include <unordered_map>
 #include <vector>
 #include "detours.h"
@@ -16,14 +17,59 @@ static decltype(&WSAConnect) originalWSAConnect = WSAConnect;
 static decltype(&WSAIoctl) originalIoctl = WSAIoctl;
 static decltype(&getpeername) originalPeer = getpeername;
 static decltype(&closesocket) originalClose = closesocket;
+static decltype(&bind) originalBind = bind;
+static decltype(&getsockname) originalName = getsockname;
 static LPFN_CONNECTEX originalConnectEx;
 static SRWLOCK peersLock = SRWLOCK_INIT;
 struct Peer { sockaddr_storage address; int size; };
 // Other DLLs may close sockets after this DLL's CRT teardown. The OS reclaims this
 // process-lifetime table; individual socket entries are removed at closesocket.
 static auto& peers = *new std::unordered_map<SOCKET, Peer>;
+static auto& bindings = *new std::unordered_map<SOCKET, Peer>;
 struct DatagramPeer { Peer original; USHORT localPort; DWORD address; USHORT port; };
 static auto& datagrams = *new std::unordered_map<SOCKET, std::vector<DatagramPeer>>;
+static bool localIPv4(DWORD ip) {
+    ULONG size = 0; if (GetIpAddrTable(nullptr, &size, FALSE) != ERROR_INSUFFICIENT_BUFFER) return false;
+    std::vector<BYTE> bytes(size);
+    if (GetIpAddrTable((MIB_IPADDRTABLE*)bytes.data(), &size, FALSE)) return false;
+    auto table = (MIB_IPADDRTABLE*)bytes.data();
+    for (DWORD i = 0; i < table->dwNumEntries; ++i) if (table->table[i].dwAddr == ip) return true;
+    return false;
+}
+static int WSAAPI hookedBind(SOCKET s, const sockaddr* address, int size) {
+    DWORD ip = 0; int expected = 0;
+    if (address && address->sa_family == AF_INET && size >= (int)sizeof(sockaddr_in)) {
+        ip = ((sockaddr_in*)address)->sin_addr.s_addr; expected = sizeof(sockaddr_in);
+    } else if (address && address->sa_family == AF_INET6 && size >= (int)sizeof(sockaddr_in6) &&
+        IN6_IS_ADDR_V4MAPPED(&((sockaddr_in6*)address)->sin6_addr)) {
+        memcpy(&ip, ((sockaddr_in6*)address)->sin6_addr.u.Byte + 12, 4); expected = sizeof(sockaddr_in6);
+    }
+    int type = 0, typeSize = sizeof(type);
+    if (!expected || !ip || (ntohl(ip) >> 24) == 127 || !localIPv4(ip) ||
+        getsockopt(s, SOL_SOCKET, SO_TYPE, (char*)&type, &typeSize) || (type != SOCK_STREAM && type != SOCK_DGRAM))
+        return originalBind(s, address, size);
+    // Windows rejects packets from a NIC-bound socket to 127.0.0.1. Keep the
+    // transport on loopback while exposing the requested local identity to apps.
+    Peer original = {}; original.size = expected; memcpy(&original.address, address, expected);
+    sockaddr_storage local = original.address; DWORD loopback = htonl(INADDR_LOOPBACK);
+    if (local.ss_family == AF_INET) ((sockaddr_in*)&local)->sin_addr.s_addr = loopback;
+    else memcpy(((sockaddr_in6*)&local)->sin6_addr.u.Byte + 12, &loopback, 4);
+    int result = originalBind(s, (sockaddr*)&local, expected);
+    if (!result) { AcquireSRWLockExclusive(&peersLock); bindings[s] = original; ReleaseSRWLockExclusive(&peersLock); }
+    return result;
+}
+static int WSAAPI hookedName(SOCKET s, sockaddr* address, int* size) {
+    int result = originalName(s, address, size);
+    if (!result && address && size) {
+        AcquireSRWLockShared(&peersLock); auto it = bindings.find(s);
+        if (it != bindings.end() && *size >= it->second.size) {
+            if (address->sa_family == AF_INET) ((sockaddr_in*)address)->sin_addr = ((sockaddr_in*)&it->second.address)->sin_addr;
+            else if (address->sa_family == AF_INET6) ((sockaddr_in6*)address)->sin6_addr = ((sockaddr_in6*)&it->second.address)->sin6_addr;
+        }
+        ReleaseSRWLockShared(&peersLock);
+    }
+    return result;
+}
 static bool exchange(ConnectRequest& request, ConnectReply& reply) {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     ULONGLONG deadline = GetTickCount64() + 5000;
@@ -146,7 +192,7 @@ static int WSAAPI hookedPeer(SOCKET s, sockaddr* address, int* size) {
 static int WSAAPI hookedClose(SOCKET s) {
     ForgetDatagramSocket(s);
     std::vector<DatagramPeer> old;
-    AcquireSRWLockExclusive(&peersLock); peers.erase(s);
+    AcquireSRWLockExclusive(&peersLock); peers.erase(s); bindings.erase(s);
     auto found = datagrams.find(s); if (found != datagrams.end()) { old = std::move(found->second); datagrams.erase(found); }
     ReleaseSRWLockExclusive(&peersLock);
     int result = originalClose(s), error = WSAGetLastError();
@@ -157,6 +203,8 @@ bool AttachConnectHooks() {
     if (!GetEnvironmentVariableW(L"REGION_LAUNCHER_CONNECT_PIPE", brokerPipe, _countof(brokerPipe))) return false;
     dedicatedDns = GetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", nullptr, 0) != 0;
     return DetourAttach(&(PVOID&)originalConnect, hookedConnect) == NO_ERROR &&
+        DetourAttach(&(PVOID&)originalBind, hookedBind) == NO_ERROR &&
+        DetourAttach(&(PVOID&)originalName, hookedName) == NO_ERROR &&
         DetourAttach(&(PVOID&)originalWSAConnect, hookedWSAConnect) == NO_ERROR &&
         DetourAttach(&(PVOID&)originalIoctl, hookedIoctl) == NO_ERROR &&
         DetourAttach(&(PVOID&)originalPeer, hookedPeer) == NO_ERROR &&

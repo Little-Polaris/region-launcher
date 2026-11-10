@@ -4,12 +4,16 @@ import socket
 import sys
 
 
-def exchange(mapped=False):
+def exchange(mapped=False, bound=False):
     family = socket.AF_INET6 if mapped else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as stream:
         stream.settimeout(8)
         if mapped:
             stream.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        if bound:
+            stream.bind((('::ffff:' if mapped else '') + socket.gethostbyname(socket.gethostname()), 0))
+            assert stream.getsockname()[0] == ('::ffff:' if mapped else '') + socket.gethostbyname(socket.gethostname())
+            assert stream.getsockname()[1] != 0
         address = '::ffff:203.0.113.42' if mapped else '203.0.113.42'
         stream.connect((address, 443))
         assert stream.getpeername()[:2] == (address, 443), stream.getpeername()
@@ -36,6 +40,8 @@ if __name__ == '__main__':
     else:
         with ThreadPoolExecutor(max_workers=16) as pool:
             list(pool.map(exchange, [False, True] * 24))
+        exchange(bound=True)
+        exchange(mapped=True, bound=True)
         with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as stream:
             stream.settimeout(1)
             try:

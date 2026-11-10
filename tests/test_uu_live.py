@@ -60,10 +60,13 @@ def main():
             shutil.copy2(BIN/'RegionProbe.exe', app)
             target = socket.gethostbyname('stun.cloudflare.com')
             results['udp'] = {}
-            for mode in ('unconnected', 'connected'):
-                text = session('udp-'+mode, app, ['--stun', target, '3478', mode])
+            for label in ('unconnected', 'connected', 'bound-unconnected', 'bound-connected'):
+                mode = label.removeprefix('bound-')
+                args = ['--stun', target, '3478', mode]
+                if label.startswith('bound-'): args.append(socket.gethostbyname(socket.gethostname()))
+                text = session('udp-'+label, app, args)
                 exit_ip = re.search(r'STUN_EXIT=([0-9.]+)', text).group(1)
-                results['udp'][mode] = exit_ip
+                results['udp'][label] = exit_ip
                 assert exit_ip == trace['ip'], results
             print('PASS: chrome.exe connected and unconnected UDP share selected proxy exit', flush=True)
             shutil.copy2(BIN/'DnsProbe.exe', app)

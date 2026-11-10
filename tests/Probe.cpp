@@ -40,6 +40,12 @@ int wmain(int argc, wchar_t** argv) {
         ULONGLONG tick = GetTickCount64(); DWORD pid = GetCurrentProcessId();
         memcpy(request + 8, &tick, 8); memcpy(request + 16, &pid, 4);
         bool connected = argc > 4 && !wcscmp(argv[4], L"connected");
+        if (argc > 5) {
+            sockaddr_in local = {}; local.sin_family = AF_INET;
+            if (InetPtonW(AF_INET, argv[5], &local.sin_addr) != 1 || bind(sock, (sockaddr*)&local, sizeof(local))) {
+                printf("BIND_ERROR=%d\n", WSAGetLastError()); closesocket(sock); WSACleanup(); return 3;
+            }
+        }
         int sent = connected ? (connect(sock, (sockaddr*)&target, sizeof(target)) ? -1 : send(sock, (char*)request, 20, 0)) :
             sendto(sock, (char*)request, 20, 0, (sockaddr*)&target, sizeof(target));
         BYTE reply[1024]; int size = sent == 20 ? recv(sock, (char*)reply, sizeof(reply), 0) : -1;

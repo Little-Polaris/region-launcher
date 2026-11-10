@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Region Launcher UDP verification</title>
+<h1>Native WebRTC UDP probe</h1>
+<p>This page uses the browser's standard WebRTC API without changing browser settings.</p>
+<pre id="result">Starting…</pre>
+<script>
+const output = document.getElementById('result');
+const lines = [];
+const log = message => { lines.push(message); output.textContent = lines.join('\n'); };
+try {
+  const pc = new RTCPeerConnection({iceServers:[{urls:'stun:stun.cloudflare.com:3478'}]});
+  pc.createDataChannel('probe');
+  pc.onicecandidate = event => {
+    if (event.candidate) log('CANDIDATE ' + event.candidate.candidate);
+    else { log('GATHERING COMPLETE'); pc.close(); }
+  };
+  pc.onicecandidateerror = event => log('ICE ERROR ' + event.errorCode + ' ' + event.errorText);
+  pc.onicegatheringstatechange = () => log('STATE ' + pc.iceGatheringState);
+  pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(error => log('OFFER ERROR ' + error));
+  setTimeout(() => { log('TIMEOUT/END'); pc.close(); }, 20000);
+} catch (error) { log('INITIALIZATION ERROR ' + error); }
+</script>

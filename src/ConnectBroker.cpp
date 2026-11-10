@@ -96,6 +96,15 @@ static bool peerOwnedBy(SOCKET s, ULONG pid) {
     return false;
 }
 struct Relay { SOCKET listener; ULONG pid; ConnectRequest request; };
+static void logRoute(const Relay& task, bool udp, bool ok) {
+    IN_ADDR ip; ip.s_addr = task.request.address; char target[INET_ADDRSTRLEN] = {}, via[INET_ADDRSTRLEN] = {};
+    InetNtopA(AF_INET, &ip, target, sizeof(target));
+    bool dns = dnsAddress && task.request.port == htons(53);
+    ip.s_addr = dns ? dnsAddress : htonl(INADDR_LOOPBACK); InetNtopA(AF_INET, &ip, via, sizeof(via));
+    fprintf(stdout, "[ConnectBroker] PID=%lu %s%s:%u %s %s %s:%u\n", task.pid, udp ? "UDP " : "TCP ",
+        target, ntohs(task.request.port), ok ? "PROXY" : "FAILED", dns ? "DNS" : "SOCKS5", via, dns ? 53 : socksPort);
+    fflush(stdout);
+}
 struct UdpRelay { Relay base; USHORT localPort; HANDLE cancel; };
 static std::unordered_map<USHORT, UdpRelay*> udpFlows;
 static bool udpOwnedBy(USHORT port, ULONG pid) {
@@ -126,9 +135,7 @@ static DWORD WINAPI udpRelay(void* opaque) {
         sockaddr_in endpoint = {};
         bool ok = process && remote.value != INVALID_SOCKET && control.value != INVALID_SOCKET && upstream(control, task->base.request, &endpoint);
         if (ok) ok = !connect(remote, (sockaddr*)&endpoint, sizeof(endpoint));
-        IN_ADDR ip; ip.s_addr = task->base.request.address; char text[INET_ADDRSTRLEN] = {};
-        InetNtopA(AF_INET, &ip, text, sizeof(text));
-        fprintf(stdout, "[ConnectBroker] PID=%lu UDP %s:%u %s SOCKS5 127.0.0.1:%u\n", task->base.pid, text, ntohs(task->base.request.port), ok ? "PROXY" : "FAILED", socksPort); fflush(stdout);
+        logRoute(task->base, true, ok);
         std::vector<char> buffer(65536);
         while (ok && !stopping() && WaitForSingleObject(task->cancel, 0) != WAIT_OBJECT_0 && WaitForSingleObject(process, 0) != WAIT_OBJECT_0) {
             fd_set read; FD_ZERO(&read); FD_SET(local.value, &read); FD_SET(remote.value, &read); if (!dns) FD_SET(control.value, &read);
@@ -181,9 +188,7 @@ static DWORD WINAPI relay(void* opaque) {
             if (!peerOwnedBy(client, task->pid)) continue;
             Socket remote(tcp());
             bool ok = remote.value != INVALID_SOCKET && upstream(remote, task->request);
-            IN_ADDR ip; ip.s_addr = task->request.address; char text[INET_ADDRSTRLEN] = {};
-            InetNtopA(AF_INET, &ip, text, sizeof(text));
-            fprintf(stdout, "[ConnectBroker] PID=%lu %s:%u %s SOCKS5 127.0.0.1:%u\n", task->pid, text, ntohs(task->request.port), ok ? "PROXY" : "FAILED", socksPort); fflush(stdout);
+            logRoute(*task, false, ok);
             if (!ok) { linger reset = {1, 0}; setsockopt(client, SOL_SOCKET, SO_LINGER, (char*)&reset, sizeof(reset)); break; }
             // Handshake has a deadline; a healthy stream may legitimately apply
             // backpressure for longer. StopConnectBroker interrupts blocked I/O.
