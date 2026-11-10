@@ -19,6 +19,7 @@ with zipfile.ZipFile(args.archive) as archive:
         'docs/proxy-settings.md',
         'docs/subscriptions.md',
         'docs/applications.md',
+        'docs/connectivity.md',
         'app/RegionSession.exe', 'app/RegionHook.dll', 'install/request_install.ps1',
         'install/package/install_service.ps1', 'install/package/RegionNetworkService.exe',
         'install/package/ProxyBridgeCore.dll', 'install/package/WinDivert.dll',

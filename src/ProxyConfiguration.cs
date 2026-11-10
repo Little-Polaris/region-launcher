@@ -10,6 +10,18 @@ static class ProxyConfiguration
     public static readonly string[] Protocols = ["hysteria2", "vless", "vmess", "trojan", "ss", "tuic", "anytls"];
     public static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    public static void ValidateRuntimePolicy(string path)
+    {
+        string text = File.ReadAllText(path);
+        var actual = JsonNode.Parse(text)!.AsObject();
+        var expected = Build(ReadNode(text, out int port), port);
+        foreach (string key in new[] { "mode", "rules", "tun", "external-controller", "bind-address", "allow-lan", "ipv6" })
+            if (!JsonNode.DeepEquals(actual[key], expected[key])) throw new IOException($"独立代理的 {key} 不符合固定代理规则，请在“独立代理配置”中重新校验并保存。");
+        foreach (string key in new[] { "enable", "listen", "nameserver", "respect-rules", "ipv6" })
+            if (!JsonNode.DeepEquals(actual["dns"]?[key], expected["dns"]?[key])) throw new IOException($"专用 DNS 的 {key} 配置不符合要求，请重新校验并保存。");
+        if (actual["proxies"]?[0]?["name"]?.GetValue<string>() != "RegionExit") throw new IOException("固定出口节点名称不正确，请重新校验并保存。");
+    }
+
     public static JsonObject ReadNode(string text, out int port)
     {
         var root = JsonNode.Parse(text) as JsonObject ?? throw new IOException("请选择 JSON 节点或独立代理配置文件。");

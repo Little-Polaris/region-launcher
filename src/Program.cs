@@ -8,6 +8,14 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--network-probe") {
+            try {
+                var results = ProxyHealth.ProbeAsync(null, Console.WriteLine).GetAwaiter().GetResult();
+                File.WriteAllText(args[1], JsonSerializer.Serialize(results));
+                Environment.ExitCode = results.Any(r => r.Ok) ? 0 : 1;
+            } catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+            return;
+        }
         ApplicationConfiguration.Initialize();
         if (args.Length == 2 && args[0] == "--render-preview")
         {
@@ -51,19 +59,23 @@ sealed class Launcher : Form
     readonly Button start = new() { Text = "启动所选程序", AutoSize = true };
     readonly Button stop = new() { Text = "结束本次运行", Enabled = false, AutoSize = true };
     readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
-    readonly Button checkProxy = new() { Text = "检测代理", AutoSize = true };
+    readonly Button checkProxy = new() { Text = "检测联网", AutoSize = true };
     bool preparing;
     readonly string data;
     readonly ApplicationLibrary library;
     ApplicationList? applicationList;
     bool loadingSoftware;
-    readonly DedicatedProxy dedicatedProxy = new();
+    readonly DedicatedProxy dedicatedProxy;
+    readonly DiagnosticLog? diagnostics;
     Process? session;
     string? currentJob;
     public Launcher() : this(Path.Combine(AppContext.BaseDirectory, "data")) { }
     internal Launcher(string dataDirectory)
     {
         data = dataDirectory; library = new(Path.Combine(data, "applications.json"));
+        string? logError = null;
+        try { diagnostics = new(Path.Combine(data, "logs")); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logError = ex.Message; }
+        dedicatedProxy = new(Append, values => diagnostics?.AddSecrets(values));
         Text = "Region Launcher · 环境验证版"; ClientSize = new(840, 760); MinimumSize = new(750, 710);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), ColumnCount = 3, RowCount = 14 };
@@ -89,13 +101,13 @@ sealed class Launcher : Form
         var proxy = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; proxy.Controls.Add(proxyHost); proxy.Controls.Add(proxyPort);
         checkProxy.Click += async (_, _) => {
             preparing = true; UpdateActions();
-            try { await CheckProxy(); Append("SOCKS5 握手通过；尚不代表所有目标网站可访问。"); }
+            try { await CheckProxy(); }
             catch (Exception ex) { Append("代理检测失败：" + ex.Message); }
             finally { preparing = false; UpdateActions(); }
         };
         configureProxy.Click += (_, _) => {
             using var dialog = new ProxySettingsDialog(dedicatedProxy);
-            if (dialog.ShowDialog(this) == DialogResult.OK) { RefreshProxy(); Append("独立代理配置已保存；下次启动使用新节点。"); }
+            if (dialog.ShowDialog(this) == DialogResult.OK) { dedicatedProxy.Dispose(); RefreshProxy(); Append("独立代理配置已保存；旧内核已停止，下次检测或启动使用新节点。"); }
         };
         proxy.Controls.Add(checkProxy); proxy.Controls.Add(configureProxy); grid.Controls.Add(proxy, 1, 5); grid.SetColumnSpan(proxy, 2);
         country.Items.AddRange(WindowsSettings.Regions().Cast<object>().ToArray());
@@ -118,6 +130,12 @@ sealed class Launcher : Form
             SaveSoftware(entry);
         };
         buttons.Controls.Add(probe); grid.Controls.Add(buttons, 0, 12); grid.SetColumnSpan(buttons, 3);
+        var openLogs = new Button { Text = "打开日志", AutoSize = true };
+        openLogs.Click += (_, _) => {
+            try { var folder = Path.Combine(data, "logs"); Directory.CreateDirectory(folder); Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true }); }
+            catch (Exception ex) { Append("无法打开日志目录：" + ex.Message); }
+        };
+        buttons.Controls.Add(openLogs);
         grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
         ApplySettings(new Profile());
         start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
@@ -129,7 +147,6 @@ sealed class Launcher : Form
             { e.Cancel = true; return; }
             StopSession();
         };
-        FormClosed += (_, _) => dedicatedProxy.Dispose();
         dedicatedProxy.UnexpectedExit += () => { StopSession(); Append("独立代理已退出，正在结束本次运行；不会切回 7890。"); };
         Directory.CreateDirectory(data);
         try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); ApplySettings(p); } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
@@ -137,6 +154,8 @@ sealed class Launcher : Form
         catch (Exception ex) { Append($"软件列表读取失败，原文件已保留：{ex.Message} 请检查 {Path.Combine(data, "applications.json")} 后重启。"); }
         RefreshProxy();
         UpdateTimeNote();
+        Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
+        if (logError != null) Append("日志文件不可写：" + logError);
         Append("地区、语言和时区选项来自 Windows；仅对本次环境生效。尚未安装或登录 Claude。");
     }
     void RefreshProxy()
@@ -149,13 +168,19 @@ sealed class Launcher : Form
         catch { Append("独立代理配置无法读取，请点击“独立代理配置”修正。"); }
         UpdateActions();
     }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
+        base.Dispose(disposing);
+    }
     void UpdateActions()
     {
         start.Enabled = !preparing && software.SelectedItem is LaunchApplication && applicationList != null;
         software.Enabled = addSoftware.Enabled = !preparing && applicationList != null;
         editSoftware.Enabled = removeSoftware.Enabled = start.Enabled;
         stop.Enabled = session != null;
-        configureProxy.Enabled = checkProxy.Enabled = session == null && !preparing;
+        configureProxy.Enabled = session == null && !preparing;
+        checkProxy.Enabled = !preparing;
     }
     void RefreshSoftware()
     {
@@ -218,16 +243,37 @@ sealed class Launcher : Form
         timeNote.Text = $"{(dst.Checked ? "按 Windows 时区规则自动切换" : "全年使用标准时间")}；当前 UTC{sign}{offset.Duration():hh\\:mm}。";
     }
     static void AddLabel(TableLayoutPanel grid, string text, int row) => grid.Controls.Add(new Label { Text = text, AutoSize = true, Padding = new(0, 6, 0, 0) }, 0, row);
-    void Append(string text) { if (IsDisposed) return; if (InvokeRequired) { BeginInvoke(() => Append(text)); return; } log.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}"); }
+    void Append(string text)
+    {
+        string line = diagnostics?.Write(text) ?? $"[{DateTime.Now:HH:mm:ss}] {text}";
+        if (IsDisposed || Disposing) return;
+        if (InvokeRequired) { try { BeginInvoke(() => ShowLog(line)); } catch (InvalidOperationException) { } return; }
+        ShowLog(line);
+    }
+    void ShowLog(string line)
+    {
+        if (IsDisposed || Disposing) return;
+        if (log.TextLength > 120000) log.Text = log.Text[^60000..];
+        log.AppendText(line + Environment.NewLine);
+    }
     async Task CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
+        Append("开始检测：固定出口规则 → SOCKS5 握手 → 代理实际联网 → 环境内实际联网。");
         await dedicatedProxy.EnsureStarted();
+        Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var client = new TcpClient(); await client.ConnectAsync(proxyHost.Text.Trim(), (int)proxyPort.Value, cts.Token);
         var stream = client.GetStream(); await stream.WriteAsync(new byte[] { 5, 1, 0 }, cts.Token);
         byte[] answer = new byte[2]; await stream.ReadExactlyAsync(answer, cts.Token);
         if (answer[0] != 5 || answer[1] != 0) throw new IOException("此版本需要无需认证的 SOCKS5 代理。");
+        Append("SOCKS5 握手通过，正在验证 HTTPS 和出口地址。");
+        var throughProxy = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s));
+        ProxyHealth.RequireInternet(throughProxy);
+        var inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics);
+        ProxyHealth.RequireMatchingExit(throughProxy, inside);
+        Append($"实际联网及环境出口校验通过：代理 {throughProxy.Count(r => r.Ok)}/{throughProxy.Length}，环境 {inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。同一站点两层出口一致；失败站点见上方日志。");
+        Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
     }
     async Task StartSession()
     {
@@ -240,6 +286,7 @@ sealed class Launcher : Form
             ApplicationLibrary.ValidateEntry(selected);
             string app = ApplicationLibrary.ResolvePath(selected.Application); if (!File.Exists(app)) throw new FileNotFoundException("程序不存在，请点击“编辑”更新程序路径。");
             string appArgs = selected.Arguments;
+            Append($"请求启动软件：{selected.Name}；程序={app}；模式={(join ? "加入当前环境" : "新建环境")}。");
             foreach (string s in new[] { app, appArgs, proxyHost.Text }) if (s.Contains('\n') || s.Contains('\r') || s.Contains('\0')) throw new ArgumentException("配置不能包含换行符或空字符。");
             if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
             string dnsAddress = dedicatedProxy.DnsAddress;
@@ -269,7 +316,7 @@ sealed class Launcher : Form
             preparing = false; UpdateActions();
             proxyHost.Enabled = proxyPort.Enabled = dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = false;
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
-            await session.WaitForExitAsync(); await logs; Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
+            await session.WaitForExitAsync(); await logs; diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) { Append("未启动或运行失败：" + ex.Message); if (session is { HasExited: true }) { session.Dispose(); session = null; } }
         finally { preparing = false; UpdateActions(); dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = session == null; }
@@ -277,6 +324,8 @@ sealed class Launcher : Form
     void StopSession()
     {
         if (currentJob == null) return;
+        Append("请求结束运行环境：" + currentJob);
         try { using var evt = EventWaitHandle.OpenExisting(currentJob + ".stop"); evt.Set(); } catch (WaitHandleCannotBeOpenedException) { }
+        diagnostics?.CaptureNetworkLog("停止请求");
     }
 }
