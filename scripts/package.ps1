@@ -6,11 +6,10 @@ $workspace = Split-Path (Split-Path $root -Parent) -Parent
 $output = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $workspace 'outputs/region-launcher-unified' }
 $app = Join-Path $output 'app'
 $docs = Join-Path $output 'docs'
-$source = Join-Path $output 'source'
 $packages = Join-Path $output 'packages'
 $licenses = Join-Path $app 'licenses'
 $version = ([xml](Get-Content "$root/src/RegionLauncher.csproj" -Raw)).Project.PropertyGroup.Version
-New-Item -ItemType Directory -Force -Path $app,$docs,$source,$packages,$licenses | Out-Null
+New-Item -ItemType Directory -Force -Path $app,$docs,$packages,$licenses | Out-Null
 $files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','RegionSession.exe','RegionHook.dll','RegionProbe.exe','DnsProbe.exe')
 foreach ($file in $files) {
     $from = Join-Path $bin $file; $to = Join-Path $app $file
@@ -39,8 +38,6 @@ if (Test-Path -LiteralPath "$root/build/test-results/launcher.png") { Copy-Item 
 Push-Location $root
 try {
     $commit = git rev-parse HEAD
-    git archive --format=zip --output="$source/RegionLauncher-$version-source.zip" HEAD
-    if ($LASTEXITCODE) { throw 'Source archive failed' }
     Set-Content -LiteralPath "$docs/build-commit.txt" -Value $commit -Encoding utf8
 } finally { Pop-Location }
 $hashFiles = @($files)
@@ -52,6 +49,7 @@ Set-Content -LiteralPath "$output/SHA256SUMS.txt" -Value $hashes -Encoding utf8
 # Assemble a clean package. Never zip the live app/data (browser sessions or node secrets).
 $stage = Join-Path "$root/build" ('package-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path "$stage/app" -Force | Out-Null
+try {
 foreach ($file in $files) { Copy-Item -LiteralPath "$app/$file" -Destination "$stage/app" }
 Copy-Item -LiteralPath $licenses -Destination "$stage/app" -Recurse
 if (Test-Path "$app/proxy") { Copy-Item -LiteralPath "$app/proxy" -Destination "$stage/app" -Recurse }
@@ -60,4 +58,11 @@ Copy-Item -LiteralPath (Join-Path $output 'install') -Destination $stage -Recurs
 Get-ChildItem -LiteralPath $output -Filter '*.cmd' -File | Copy-Item -Destination $stage
 Copy-Item -LiteralPath "$output/使用说明.md","$output/SHA256SUMS.txt" -Destination $stage
 Compress-Archive -LiteralPath "$stage/app","$stage/docs","$stage/install","$stage/安装或更新后台服务.cmd","$stage/卸载后台服务.cmd","$stage/使用说明.md","$stage/SHA256SUMS.txt" -DestinationPath "$packages/RegionLauncher-$version-win-x64.zip" -Force
+} finally {
+    $resolvedStage = [IO.Path]::GetFullPath($stage)
+    $buildRoot = [IO.Path]::GetFullPath((Join-Path $root 'build')) + [IO.Path]::DirectorySeparatorChar
+    if (!$resolvedStage.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($resolvedStage) -notmatch '^package-[0-9a-f]{32}$') { throw 'Unexpected package staging directory' }
+    Remove-Item -LiteralPath $resolvedStage -Recurse -Force
+}
 Write-Output "Packaged: $output"
