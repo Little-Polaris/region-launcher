@@ -4,6 +4,9 @@
     <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <Compile Include="../../src/Subscription.cs" Link="Subscription.cs" />
+    <Compile Include="../../src/SubscriptionDialog.cs" Link="SubscriptionDialog.cs" />
     <Compile Include="../../src/ProxyConfiguration.cs" Link="ProxyConfiguration.cs" />
     <Compile Include="../../src/ProxySettingsDialog.cs" Link="ProxySettingsDialog.cs" />
     <Compile Include="../../src/DedicatedProxy.cs" Link="DedicatedProxy.cs" />

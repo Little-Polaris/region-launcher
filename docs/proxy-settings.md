@@ -16,7 +16,7 @@
 
 “高级选项”接收一个 JSON 对象，格式采用 Mihomo 节点字段，例如 `network`、`ws-opts`、`grpc-opts`、`reality-opts`、`alpn`、`obfs`。不填写时保留 `{}`。导入后这些额外字段会保留；切换协议会清空协议相关的凭据及高级选项，请重新填写。TLS/传输字段可参考 [Mihomo TLS](https://wiki.metacubex.one/config/proxies/tls/) 与 [传输层](https://wiki.metacubex.one/config/proxies/transport/) 文档。
 
-“导入 JSON…”支持单个 Mihomo 节点对象，或只含一个 proxies 节点的 JSON 配置，包括原版的 data/private/proxy.json。只导入节点和独立端口，路由、DNS、监听范围由启动器生成。当前不支持 YAML、订阅地址、分享链接或多节点列表。
+“机场订阅 / 选节点…”可输入订阅链接并选择节点；“导入文件…”支持 YAML、JSON 和 TXT 节点文件，包括原版的 data/private/proxy.json。支持多个节点，导入后选择其中一个固定出口。路由、DNS、监听范围和本地端口保持由启动器管理。详细步骤见 [订阅使用说明](subscriptions.md)。
 
 “校验配置”由随包的 Mihomo 内核检查格式及参数，不连接节点，也不证明节点在线。“校验并保存”先完成同样检查，再替换本地配置；已有文件备份到 data/private/proxy.json.bak。校验失败保留原文件。配置及备份含节点凭据，不要分享；压缩包排除整个 data 目录。
 

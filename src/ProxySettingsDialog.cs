@@ -16,7 +16,8 @@ sealed class ProxySettingsDialog : Form
     readonly Label status = new() { AutoSize = true, Dock = DockStyle.Fill, MaximumSize = new(620, 0) };
     readonly Button save = new() { Text = "校验并保存", AutoSize = true };
     readonly Button validate = new() { Text = "校验配置", AutoSize = true };
-    readonly Button import = new() { Text = "导入 JSON…", AutoSize = true };
+    readonly Button import = new() { Text = "导入文件…", AutoSize = true };
+    readonly Button subscription = new() { Text = "机场订阅 / 选节点…", AutoSize = true };
     readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     readonly Dictionary<Control, Label> fieldLabels = new();
     readonly DedicatedProxy proxy;
@@ -60,7 +61,7 @@ sealed class ProxySettingsDialog : Form
         status.Padding = new(0, 8, 0, 8); layout.Controls.Add(status, 0, 2);
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
         var cancel = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
-        actions.Controls.AddRange([import, validate, save, cancel]); layout.Controls.Add(actions, 0, 3); Controls.Add(layout);
+        actions.Controls.AddRange([subscription, import, validate, save, cancel]); layout.Controls.Add(actions, 0, 3); Controls.Add(layout);
         CancelButton = cancel;
         protocol.SelectedIndexChanged += (_, _) =>
         {
@@ -70,16 +71,31 @@ sealed class ProxySettingsDialog : Form
         protocol.SelectedIndex = 0;
         import.Click += (_, _) =>
         {
-            using var dialog = new OpenFileDialog { Filter = "JSON 节点或独立配置 (*.json)|*.json" };
+            using var dialog = new OpenFileDialog { Filter = "订阅或节点 (*.yaml;*.yml;*.json;*.txt)|*.yaml;*.yml;*.json;*.txt|所有文件 (*.*)|*.*" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-            try { LoadText(File.ReadAllText(dialog.FileName)); status.Text = "已导入，校验并保存后生效。"; }
-            catch { status.Text = "导入失败：需要有效的单节点 JSON，原配置未修改。"; }
+            try {
+                if (new FileInfo(dialog.FileName).Length > Subscription.MaxBytes) throw new IOException("订阅文件不能超过 4 MB。");
+                SelectSubscription(File.ReadAllText(dialog.FileName));
+            }
+            catch (Exception ex) { status.Text = ex is IOException ? ex.Message : "导入失败，请检查订阅格式；原配置未修改。"; }
         };
+        subscription.Click += (_, _) => SelectSubscription();
         validate.Click += async (_, _) => await Apply(false);
         save.Click += async (_, _) => await Apply(true);
         FormClosing += (_, e) => { if (working) e.Cancel = true; };
         try { if (proxy.Configured) LoadText(File.ReadAllText(proxy.ConfigPath)); }
         catch { status.Text = "已有配置无法读取，可以重新填写或导入；保存前不会覆盖它。"; }
+    }
+
+    void SelectSubscription(string? text = null)
+    {
+        using var selector = new SubscriptionDialog(Path.GetDirectoryName(proxy.ConfigPath)!, text);
+        if (selector.ShowDialog(this) != DialogResult.OK || selector.SelectedNode == null) return;
+        var selected = selector.SelectedNode;
+        // The provider's inbound port never replaces the launcher's dedicated port.
+        var config = new JsonObject { ["mixed-port"] = (int)localPort.Value, ["proxies"] = new JsonArray(selected.DeepClone()) };
+        try { LoadText(config.ToJsonString()); status.Text = "已选择：" + selected["name"] + "。校验并保存后生效。"; }
+        catch { status.Text = "该节点参数无法载入表单，请选择其他节点；原配置未修改。"; }
     }
 
     void UpdateFields()
@@ -141,13 +157,13 @@ sealed class ProxySettingsDialog : Form
         try
         {
             var config = ReadConfig();
-            tabs.Enabled = import.Enabled = validate.Enabled = save.Enabled = false;
+            tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = false;
             await ProxyConfiguration.ValidateAndSave(config, proxy.ConfigPath, proxy.EnginePath, commit);
             if (commit) { proxy.Dispose(); saved = true; }
             else status.Text = "配置校验通过；尚未连接服务器。保存后可在主窗口检测代理。";
         }
         catch (Exception ex) { status.Text = ex is IOException ? ex.Message : "校验或保存失败，未应用新配置；请检查字段、文件权限和代理内核。"; }
-        finally { working = false; tabs.Enabled = import.Enabled = validate.Enabled = save.Enabled = true; }
+        finally { working = false; tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = true; }
         if (saved) { DialogResult = DialogResult.OK; Close(); }
     }
 }

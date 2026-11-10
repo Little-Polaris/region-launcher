@@ -11,6 +11,8 @@ static class Tests
         File.Copy(engine, Path.Combine(AppContext.BaseDirectory, "proxy", "mihomo.exe"), true);
         string folder = Path.GetFullPath(args[1]); Directory.CreateDirectory(folder);
         string path = Path.Combine(folder, "proxy.json");
+        Task.Run(() => SubscriptionTests.Run(engine, folder)).GetAwaiter().GetResult();
+        SubscriptionTests.Selection(folder);
         void Assert(bool value, string message) { if (!value) throw new Exception(message); }
         foreach (string type in ProxyConfiguration.Protocols)
         {

@@ -38,6 +38,9 @@ The launcher and its modifications are experimental. Upstream compatibility clai
 
 ## Windows 后台服务与参数枚举
 
+- YAML parser: YamlDotNet 18.1.0, https://www.nuget.org/packages/YamlDotNet/18.1.0 ; MIT. NuGet metadata source commit: 748334a8fa7c227740018b284b71ad95cc6b7fc7. License retained in vendor/yamldotnet/LICENSE.txt and packaged licenses/YamlDotNet-MIT.txt.
+- Subscription formats: https://github.com/MetaCubeX/Meta-Docs/blob/main/docs/config/proxy-providers/content.en.md . Parsing is local; no online conversion service is used.
+
 - Service entry point: https://learn.microsoft.com/en-us/windows/win32/services/service-entry-point
 - Service security: https://learn.microsoft.com/en-us/windows/win32/services/service-security-and-access-rights
 - Explicit handle inheritance: https://learn.microsoft.com/en-us/windows/win32/procthread/creating-processes
