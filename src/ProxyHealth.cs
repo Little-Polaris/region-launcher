@@ -12,7 +12,7 @@ static class ProxyHealth
         new("Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace", true),
         new("国内 IP 检测", "https://my.ip.cn/", false)
     ];
-    public static async Task<ProbeResult[]> ProbeAsync(int? port, Action<string> log, ProbeSite[]? sites = null, TimeSpan? timeout = null)
+    public static async Task<ProbeResult[]> ProbeAsync(int? port, Action<string> log, ProbeSite[]? sites = null, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         using var handler = new SocketsHttpHandler {
             UseProxy = port.HasValue, Proxy = port.HasValue ? new WebProxy($"socks5://127.0.0.1:{port}") : null,
@@ -25,10 +25,10 @@ static class ProxyHealth
                 using var request = new HttpRequestMessage(HttpMethod.Get, site.Url);
                 request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
                 request.Headers.UserAgent.ParseAdd("RegionLauncher-Connectivity/1.0");
-                using var response = await client.SendAsync(request).ConfigureAwait(false);
+                using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 status = (int)response.StatusCode;
                 if (response.StatusCode != HttpStatusCode.OK) throw new IOException($"HTTP {status}，未收到预期检测内容");
-                string text = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 string? ip = null, country = null;
                 if (site.Trace) {
                     foreach (string line in text.Split('\n')) {
@@ -41,7 +41,7 @@ static class ProxyHealth
                 log($"{site.Name}：HTTPS 实际请求成功，HTTP {status}，{timer.ElapsedMilliseconds} ms，出口 {ip}" + (country == null ? "" : $"，地区 {country}"));
                 return new ProbeResult(site.Name, new Uri(site.Url).Host, true, timer.ElapsedMilliseconds, status, ip, country, null);
             } catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) {
-                string error = ex is OperationCanceledException ? "请求超时" : ex.Message + (ex.InnerException == null ? "" : "；" + ex.GetBaseException().Message);
+                string error = ex is OperationCanceledException ? (cancellationToken.IsCancellationRequested ? "检测已取消" : "请求超时") : ex.Message + (ex.InnerException == null ? "" : "；" + ex.GetBaseException().Message);
                 log($"{site.Name}：失败，{timer.ElapsedMilliseconds} ms，{error}");
                 return new ProbeResult(site.Name, new Uri(site.Url).Host, false, timer.ElapsedMilliseconds, status, null, null, error);
             }

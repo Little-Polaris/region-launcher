@@ -26,11 +26,18 @@ sealed class SearchComboBox : ComboBox
         try {
             BeginUpdate(); Items.Clear(); Items.AddRange(options); SelectedItem = value;
             Text = value?.ToString() ?? "";
-        } finally { EndUpdate(); updating = false; }
+        } finally { EndUpdate(); updating = false; ClearAutomaticSelection(); }
     }
     protected override void OnSelectedIndexChanged(EventArgs e) {
         if (updating || SelectedItem == null) return;
         value = SelectedItem; base.OnSelectedIndexChanged(e);
+        ClearAutomaticSelection();
+        if (IsHandleCreated) BeginInvoke(() => { if (!IsDisposed && !Focused) ClearAutomaticSelection(); });
+    }
+    void ClearAutomaticSelection() { SelectionStart = Text.Length; SelectionLength = 0; }
+    protected override void OnEnter(EventArgs e) {
+        base.OnEnter(e);
+        BeginInvoke(() => { if (!IsDisposed && SelectedItem != null && !composing) ClearAutomaticSelection(); });
     }
     protected override void OnTextUpdate(EventArgs e) {
         base.OnTextUpdate(e);
@@ -92,6 +99,8 @@ sealed class SearchComboBox : ComboBox
     protected override void WndProc(ref Message m) {
         if (m.Msg == 0x020a) { Wheel((short)((long)m.WParam >> 16)); m.Result = 0; return; }
         base.WndProc(ref m);
+        // Native CB_SETCURSEL selects the edit text after the managed selection event.
+        if (m.Msg == 0x014e) ClearAutomaticSelection();
     }
     protected override void Dispose(bool disposing) {
         if (disposing) { scroll.Dispose(); list.ReleaseHandle(); edit.ReleaseHandle(); }

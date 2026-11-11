@@ -1,6 +1,13 @@
 using System.Reflection;
 using System.Text.Json;
 
+if (args.Length > 0 && args[0] == "--tray-leaf") { Thread.Sleep(Timeout.Infinite); return; }
+if (args.Length == 2 && args[0] == "--tray-fixture") {
+    using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
+    File.WriteAllText(args[1], $"{Environment.ProcessId},{child.Id}");
+    Thread.Sleep(Timeout.Infinite); return;
+}
+
 var entry = Assembly.LoadFrom(Path.GetFullPath(args[0])).EntryPoint
     ?? throw new Exception("Missing application entry point");
 if (entry.GetCustomAttribute<STAThreadAttribute>() == null)
@@ -136,7 +143,7 @@ var ui = new Thread(() =>
         form.GetType().GetMethod("SaveSoftwareList", flags)!.Invoke(form, new[] { empty });
         if (start.Enabled || software.Items.Count != 0 || executable.Text != "" || arguments.Text != "")
             throw new Exception("Deleting all software left a stale launch target");
-        form.Close();
+        TrayTests.Run(form, Path.GetDirectoryName(Path.GetFullPath(args[0]))!, fixture);
         File.WriteAllText(Path.Combine(fixture, "applications.json"), "{malformed");
         using var broken = (System.Windows.Forms.Form)OpenLauncher();
         if (((System.Windows.Forms.Button)broken.GetType().GetField("start", flags)!.GetValue(broken)!).Enabled ||

@@ -50,6 +50,13 @@ foreach (string mode in new[] { "reject", "invalid", "success", "timeout" }) {
     Assert(socks.Handshake, "SOCKS handshake not attempted");
 }
 var good = new ProbeResult("fixture", "fixture.test", true, 10, 200, "203.0.113.7", "US", null);
+using (var socks = new FakeSocks("timeout")) {
+    using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+    var elapsed = Stopwatch.StartNew();
+    var canceled = await ProxyHealth.ProbeAsync(socks.Port, _ => {}, [new("Fixture", url, true)], cancellationToken: cancel.Token);
+    Assert(!canceled[0].Ok && canceled[0].Error == "检测已取消" && elapsed.Elapsed < TimeSpan.FromSeconds(3), "Exit cancellation did not stop connectivity probe promptly");
+    Assert(!direct.Pending(), "Canceled request fell back to direct");
+}
 ProxyHealth.RequireMatchingExit([good], [good]);
 foreach (var bad in new[] { good with { Ip = "203.0.113.8" }, good with { Host = "other.test" }, good with { Ok = false } }) {
     try { ProxyHealth.RequireMatchingExit([good], [bad]); throw new Exception("Unverified route accepted"); } catch (IOException) { }

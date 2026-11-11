@@ -1,0 +1,49 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Text;
+using System.Windows.Forms;
+
+static class TrayTests {
+    const BindingFlags Hidden = BindingFlags.Instance | BindingFlags.NonPublic;
+    static void PumpUntil(Func<bool> done) {
+        var timer = Stopwatch.StartNew();
+        while (!done() && timer.Elapsed < TimeSpan.FromSeconds(15)) { Application.DoEvents(); Thread.Sleep(20); }
+        if (!done()) throw new Exception("Tray lifecycle timed out");
+    }
+    static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
+    public static void Run(Form form, string bin, string data) {
+        var type = form.GetType();
+        var tray = (NotifyIcon)type.GetField("tray", Hidden)!.GetValue(form)!;
+        Check(tray.Visible && tray.ContextMenuStrip!.Items.Count == 3, "Tray menu missing");
+        var job = @"Local\RegionLauncher." + Guid.NewGuid().ToString("N");
+        var config = Path.Combine(data, "tray-session.ini"); var report = Path.Combine(data, "tray-processes.txt");
+        File.WriteAllText(config, $"[session]\nJob={job}\nApplication={Environment.ProcessPath}\nArguments=--tray-fixture \"{report}\"\nLocale=en-US\nRegion=US\nGeo=244\nTimeZone=Pacific Standard Time\n", Encoding.Unicode);
+        using var outside = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
+        using var session = Process.Start(new ProcessStartInfo(Path.Combine(bin, "RegionSession.exe"), $"--locale-test \"{config}\"") { UseShellExecute = false, CreateNoWindow = true })!;
+        try {
+            PumpUntil(() => File.Exists(report) && new FileInfo(report).Length > 0);
+            var ids = File.ReadAllText(report).Split(',').Select(int.Parse).ToArray();
+            using var root = Process.GetProcessById(ids[0]); using var child = Process.GetProcessById(ids[1]);
+            type.GetField("session", Hidden)!.SetValue(form, session);
+            type.GetField("currentJob", Hidden)!.SetValue(form, job);
+            type.GetField("preparing", Hidden)!.SetValue(form, true);
+            form.Close(); Application.DoEvents();
+            Check(!form.Visible && !form.IsDisposed && tray.Visible && !session.HasExited && !root.HasExited && !child.HasExited, "Closing window stopped background work");
+            tray.ContextMenuStrip!.Items[0].PerformClick(); Application.DoEvents();
+            Check(form.Visible && form.ShowInTaskbar, "Tray restore failed");
+            // Exit must wait for a pending preparation to observe cancellation.
+            var shutdown = (CancellationTokenSource)type.GetField("shutdown", Hidden)!.GetValue(form)!;
+            var pending = Task.Delay(Timeout.Infinite, shutdown.Token);
+            ((HashSet<Task>)type.GetField("operations", Hidden)!.GetValue(form)!).Add(pending);
+            tray.ContextMenuStrip.Items[2].PerformClick();
+            PumpUntil(() => form.IsDisposed);
+            Check(pending.IsCanceled && session.HasExited && root.HasExited && child.HasExited, "Tray exit left a process group alive");
+            Check(!outside.HasExited && !tray.Visible, "Tray exit affected outside process or left tray icon");
+            Console.WriteLine("PASS: close-to-tray while preparing, menu restore, tray exit cancels pending work and stops real root/child job; outside process survives");
+        } finally {
+            try { using var stop = EventWaitHandle.OpenExisting(job + ".stop"); stop.Set(); } catch (WaitHandleCannotBeOpenedException) { }
+            if (!session.HasExited) { if (!session.WaitForExit(5000)) session.Kill(true); }
+            if (!outside.HasExited) { outside.Kill(); outside.WaitForExit(); }
+        }
+    }
+}

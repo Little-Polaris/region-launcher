@@ -9,9 +9,11 @@ static class SearchComboTests
     static object Invoke(ComboBox box, string method, params object[] args) => box.GetType().GetMethod(method, Hidden | BindingFlags.Public)!.Invoke(box, args)!;
     static void Check(bool ok, string what) { if (!ok) throw new Exception(what); }
     public static void Run(ComboBox country, ComboBox language, ComboBox zone, string settingsFile) {
+        Application.DoEvents();
         var original = File.ReadAllBytes(settingsFile);
         foreach (var (box, query) in new[] { (country, "US"), (language, "en-US"), (zone, "Pacific Standard") }) {
             int count = box.Items.Count; var selected = box.SelectedItem;
+            Check(box.SelectionLength == 0, "Saved values should not have automatic blue selection");
             Check(box.DropDownStyle == ComboBoxStyle.DropDown, "Search input must be editable");
             box.Focus();
             box.Text = query; box.SelectionStart = query.Length; Invoke(box, "OnTextUpdate", EventArgs.Empty);
@@ -24,6 +26,7 @@ static class SearchComboTests
             Check(box.Items.Count == 0, "Unmatched query must have no options");
             Invoke(box, "OnLeave", EventArgs.Empty);
             Check(box.Items.Count == count && Equals(box.SelectedItem, selected), "Leaving search lost saved selection");
+            Check(box.SelectionLength == 0, "Leaving search kept a blue text selection");
             box.Text = ""; Invoke(box, "OnTextUpdate", EventArgs.Empty);
             Check(box.Items.Count == count, "Empty search must show all options");
             box.DroppedDown = false; Application.DoEvents();
@@ -35,6 +38,10 @@ static class SearchComboTests
         Check((bool)Invoke(country, "ProcessCmdKey", message, Keys.Enter), "Enter should select a suggestion");
         Check(country.SelectedItem!.ToString()!.Contains("(JP)"), "Enter selected wrong filtered result");
         country.SelectedItem = priorCountry;
+        country.Focus(); Application.DoEvents();
+        Check(country.SelectionLength == 0, "Focusing a saved value automatically selected all text");
+        country.SelectAll(); Check(country.SelectionLength == country.Text.Length, "Manual text selection must still work");
+        Invoke(country, "ResetFilter");
         Check(File.ReadAllBytes(settingsFile).SequenceEqual(original), "Search selection did not restore correctly");
         // Exercise the actual native dropdown wheel path, including high-resolution deltas.
         var value = language.SelectedItem;

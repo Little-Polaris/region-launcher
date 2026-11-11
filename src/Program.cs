@@ -62,6 +62,11 @@ sealed class Launcher : Form
     readonly Button checkProxy = new() { Text = "检测联网", AutoSize = true };
     readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
     bool preparing;
+    bool exiting, allowClose;
+    readonly CancellationTokenSource shutdown = new();
+    readonly HashSet<Task> operations = [];
+    readonly NotifyIcon tray = new() { Text = "Region Launcher", Icon = SystemIcons.Application };
+    readonly ContextMenuStrip trayMenu = new();
     readonly string data;
     readonly ApplicationLibrary library;
     ApplicationList? applicationList;
@@ -101,12 +106,12 @@ sealed class Launcher : Form
         AddLabel(grid, "启动参数", 4); grid.Controls.Add(arguments, 1, 4); grid.SetColumnSpan(arguments, 2);
         AddLabel(grid, "独立代理", 5);
         var proxy = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; proxy.Controls.Add(proxyHost); proxy.Controls.Add(proxyPort);
-        checkProxy.Click += async (_, _) => {
+        checkProxy.Click += async (_, _) => await TrackOperation(async () => {
             preparing = true; UpdateActions();
             try { await CheckProxy(); }
             catch (Exception ex) { Append("代理检测失败：" + ex.Message); }
             finally { preparing = false; UpdateActions(); }
-        };
+        });
         configureProxy.Click += (_, _) => {
             using var dialog = new ProxySettingsDialog(dedicatedProxy);
             if (dialog.ShowDialog(this) == DialogResult.OK) { dedicatedProxy.Dispose(); RefreshProxy(); Append("独立代理配置已保存；旧内核已停止，下次检测或启动使用新节点。"); }
@@ -122,7 +127,7 @@ sealed class Launcher : Form
         grid.Controls.Add(timeNote, 1, 10); grid.SetColumnSpan(timeNote, 2);
         timeZone.SelectedIndexChanged += (_, _) => UpdateTimeNote(); dst.CheckedChanged += (_, _) => UpdateTimeNote();
         UpdateTimeNote();
-        var access = new Label { Text = "文件使用原有权限；结束运行会关闭组内所有程序，请先保存文件。", AutoSize = true, Padding = new(0, 4, 0, 8) };
+        var access = new Label { Text = "关闭窗口后在托盘运行；从托盘退出会结束全部运行，请先保存文件。", AutoSize = true, Padding = new(0, 4, 0, 8) };
         grid.Controls.Add(access, 0, 11); grid.SetColumnSpan(access, 3);
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start); buttons.Controls.Add(stop);
         var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => {
@@ -145,13 +150,17 @@ sealed class Launcher : Form
         };
         grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
         ApplySettings(new LaunchEnvironment());
-        start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
+        start.Click += async (_, _) => await TrackOperation(StartSession); stop.Click += (_, _) => StopSession();
+        trayMenu.Items.Add("打开启动器", null, (_, _) => RestoreWindow());
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add("退出（结束全部运行）", null, async (_, _) => await ExitAsync());
+        tray.ContextMenuStrip = trayMenu;
+        tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreWindow(); };
+        Shown += (_, _) => tray.Visible = true;
         FormClosing += (_, e) =>
         {
-            if (preparing) { e.Cancel = true; Append("正在准备或检测代理，请完成后再关闭。"); return; }
-            if (session != null && e.CloseReason == CloseReason.UserClosing &&
-                MessageBox.Show(this, "关闭启动器会结束环境内的全部程序。请先保存文件。\n现在关闭？", "结束运行", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
-            { e.Cancel = true; return; }
+            if (!allowClose && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); ShowInTaskbar = false; return; }
+            shutdown.Cancel();
             StopSession();
         };
         dedicatedProxy.UnexpectedExit += () => { StopSession(); Append("独立代理已退出，正在结束本次运行；不会切回 7890。"); };
@@ -181,11 +190,29 @@ sealed class Launcher : Form
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
+        if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
         base.Dispose(disposing);
+    }
+    void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
+    async Task TrackOperation(Func<Task> action) {
+        if (exiting) return;
+        var task = action(); operations.Add(task);
+        try { await task; } finally { operations.Remove(task); }
+    }
+    async Task ExitAsync() {
+        if (exiting) return;
+        exiting = true; shutdown.Cancel(); UpdateActions(); trayMenu.Items[2].Enabled = false;
+        Append("正在退出：停止检测，结束本启动器的全部运行进程，然后关闭独立代理。");
+        StopSession();
+        var pending = Task.WhenAll(operations.ToArray());
+        // Retry the stop signal while a newly created session is still creating its event.
+        while (!pending.IsCompleted || session is { HasExited: false }) { SignalSessionStop(); await Task.Delay(100); }
+        try { await pending; } catch (Exception ex) { Append("结束后台操作：" + ex.Message); }
+        allowClose = true; tray.Visible = false; Close();
     }
     void UpdateActions()
     {
+        if (exiting) { foreach (Control control in Controls) control.Enabled = false; return; }
         start.Enabled = !preparing && software.SelectedItem is LaunchApplication && applicationList != null;
         software.Enabled = addSoftware.Enabled = !preparing && applicationList != null;
         editSoftware.Enabled = removeSoftware.Enabled = start.Enabled;
@@ -296,23 +323,25 @@ sealed class Launcher : Form
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
         Append("开始检测：固定出口规则 → SOCKS5 握手 → 代理实际联网 → 环境内实际联网。");
         await dedicatedProxy.EnsureStarted();
+        shutdown.Token.ThrowIfCancellationRequested();
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token); cts.CancelAfter(TimeSpan.FromSeconds(5));
         using var client = new TcpClient(); await client.ConnectAsync(proxyHost.Text.Trim(), (int)proxyPort.Value, cts.Token);
         var stream = client.GetStream(); await stream.WriteAsync(new byte[] { 5, 1, 0 }, cts.Token);
         byte[] answer = new byte[2]; await stream.ReadExactlyAsync(answer, cts.Token);
         if (answer[0] != 5 || answer[1] != 0) throw new IOException("此版本需要无需认证的 SOCKS5 代理。");
         Append("SOCKS5 握手通过，正在验证 HTTPS 和出口地址。");
-        var throughProxy = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s));
+        var throughProxy = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: shutdown.Token);
+        shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
-        var inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics);
+        var inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token);
         ProxyHealth.RequireMatchingExit(throughProxy, inside);
         Append($"实际联网及环境出口校验通过：代理 {throughProxy.Count(r => r.Ok)}/{throughProxy.Length}，环境 {inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。同一站点两层出口一致；失败站点见上方日志。");
         Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
     }
     async Task StartSession()
     {
-        if (preparing) return;
+        if (preparing || exiting) return;
         bool join = session != null;
         preparing = true; UpdateActions();
         try
@@ -326,6 +355,7 @@ sealed class Launcher : Form
             if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
             string dnsAddress = dedicatedProxy.DnsAddress;
             start.Enabled = false; await CheckProxy();
+            shutdown.Token.ThrowIfCancellationRequested();
             var settings = selected.Environment ?? throw new IOException("所选软件缺少地区设置，请重新编辑并保存。");
             settings.Validate();
             var region = WindowsSettings.Regions().Single(r => r.GeoId == settings.GeoId);
@@ -363,7 +393,11 @@ sealed class Launcher : Form
     {
         if (currentJob == null) return;
         Append("请求结束运行环境：" + currentJob);
-        try { using var evt = EventWaitHandle.OpenExisting(currentJob + ".stop"); evt.Set(); } catch (WaitHandleCannotBeOpenedException) { }
+        SignalSessionStop();
         diagnostics?.CaptureNetworkLog("停止请求");
+    }
+    void SignalSessionStop() {
+        if (currentJob == null) return;
+        try { using var evt = EventWaitHandle.OpenExisting(currentJob + ".stop"); evt.Set(); } catch (WaitHandleCannotBeOpenedException) { }
     }
 }
