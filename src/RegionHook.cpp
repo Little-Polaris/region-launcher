@@ -7,6 +7,9 @@
 #include "SystemProxy.h"
 #include "UnicodeInjection.h"
 #include "ConnectBroker.h"
+#include "ChildEnvironment.h"
+
+static const ChildEnvironment::Values* childEnvironment;
 
 static void (WINAPI *realEntry)();
 static void WINAPI unifiedEntry() {
@@ -134,17 +137,26 @@ static void WINAPI localTime(LPSYSTEMTIME out) {
 // shortcut: service/COM broker activation is outside this process tree and requires app-specific integration.
 static BOOL WINAPI createW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
     BOOL inherit, DWORD flags, LPVOID env, LPCWSTR cwd, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi) {
-    return FinishUnicodeChild(realCreateW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, pi), flags, pi, dllPath);
+    try {
+        auto block = ChildEnvironment::build(env, flags, *childEnvironment);
+        return FinishUnicodeChild(realCreateW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath);
+    } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }
 }
 static BOOL WINAPI createA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
     BOOL inherit, DWORD flags, LPVOID env, LPCSTR cwd, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi) {
-    return FinishUnicodeChild(realCreateA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED, env, cwd, si, pi), flags, pi, dllPath);
+    try {
+        auto block = ChildEnvironment::build(env, flags, *childEnvironment);
+        return FinishUnicodeChild(realCreateA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath);
+    } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }
 }
 extern "C" __declspec(dllexport) void RegionHookMarker() {}
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (DetourIsHelperProcess()) return TRUE;
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
+    // Keep the launch snapshot alive through other DLLs' shutdown callbacks.
+    try { childEnvironment = new ChildEnvironment::Values(ChildEnvironment::capture()); }
+    catch (...) { return FALSE; }
     WCHAR tz[128] = {}, geoText[32] = {};
     if (!GetEnvironmentVariableW(L"REGION_LAUNCHER_LOCALE", locale, _countof(locale)) ||
         !GetEnvironmentVariableW(L"REGION_LAUNCHER_TIMEZONE", tz, _countof(tz)) ||

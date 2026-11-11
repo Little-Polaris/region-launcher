@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.10
+# Region Launcher 0.3.0-alpha.11
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.11 修复程序为子进程指定自定义环境变量时，丢失启动器参数并报 DLL 初始化失败（1114）的问题。保留本次运行的地区、DNS 和连接通道，支持 ANSI/Unicode 环境块；不向自定义环境复制其他父进程变量。ChatGPT 辅助组件出现了同类错误，真实远程连接仍待重启应用复查。当前通道已通过加密 WebSocket 握手、回显及空闲后续传测试。见 [子进程与 WebSocket 验证](docs/child-environment-websocket.md)。无需更新后台服务。
 
 0.3.0-alpha.10 支持为软件列表中的每个条目分别保存国家或地区、语言、时区和自动冬夏时间。选择软件即加载对应设置，主界面修改后自动保存；添加、编辑窗口也可配置。同一运行会话可以启动不同地区设置的程序及其子进程，代理节点仍共用。旧列表自动继承原地区配置。本版无需更新后台服务。格式与验证见 [软件列表](docs/applications.md)。
 
@@ -63,6 +65,8 @@ dotnet run --project tests/UiEntryPoint/UiEntryPoint.csproj -c Release -- (Resol
 python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py
 python -X utf8 tests/test_app_environments.py
+./build/ChildEnvironmentTest.exe
+python -X utf8 tests/test_child_environment.py
 python -X utf8 tests/test_unicode_paths.py --network
 python -X utf8 tests/test_private_proxy.py
 pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/service-bin

@@ -37,6 +37,7 @@ try {
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/DnsProbe.cpp'),'/link','ws2_32.lib','dnsapi.lib','iphlpapi.lib',"/OUT:$bin/DnsProbe.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/DatagramProbe.cpp'),'/link','ws2_32.lib',"/OUT:$build/DatagramProbe.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours","/I$root/src",(Join-Path $root 'tests/ConnectHarness.cpp'),(Join-Path $root 'src/ConnectBroker.cpp'),'/link','detours.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib',"/OUT:$build/ConnectHarness.exe")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/ChildEnvironment.cpp'),'/link',"/OUT:$build/ChildEnvironmentTest.exe")
     foreach ($file in @('WinDivert.dll','WinDivert64.sys')) {
         $source = Join-Path "$wd/x64" $file; $target = Join-Path $bin $file
         if (!(Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
