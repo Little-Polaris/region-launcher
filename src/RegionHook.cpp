@@ -9,6 +9,7 @@
 #include "ConnectBroker.h"
 #include "ChildEnvironment.h"
 #include "LinkHooks.h"
+#include "RegionRegistry.h"
 
 static const ChildEnvironment::Values* childEnvironment;
 
@@ -177,9 +178,11 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (zone.DynamicDaylightTimeDisabled) {
         zone.DaylightDate = {}; zone.StandardDate = {}; zone.DaylightBias = 0;
     }
+    if (!RegionRegistry::initialize(locale, geo, region, zone)) return FALSE;
     if (DetourTransactionBegin() != NO_ERROR) return FALSE;
     DetourUpdateThread(GetCurrentThread());
     LONG status = NO_ERROR;
+    if (!RegionRegistry::attach()) status = ERROR_INVALID_FUNCTION;
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", nullptr, 0) &&
         (!AttachSystemProxyHooks() || !AttachConnectHooks())) status = ERROR_INVALID_FUNCTION;
     if (!AttachIPv4Hooks()) status = ERROR_INVALID_FUNCTION;

@@ -15,6 +15,7 @@ static class SingleInstanceTests
                 var state = Path.Combine(args[3], "state");
                 using var timer = new System.Windows.Forms.Timer { Interval = 50 };
                 Func<Form> create = () => {
+                    File.WriteAllText(Path.Combine(args[3], "owner"), Environment.ProcessId.ToString());
                     Thread.Sleep(700); // A second launch can arrive before the window exists.
                     File.AppendAllText(Path.Combine(args[3], "created"), Environment.ProcessId + "\n");
                     var form = (Form)Activator.CreateInstance(launcher, BindingFlags.Instance | BindingFlags.NonPublic,
@@ -62,7 +63,7 @@ static class SingleInstanceTests
         }
         int Lines(string file) => File.Exists(Path.Combine(directory, file)) ? File.ReadAllLines(Path.Combine(directory, file)).Length : 0;
         void Duplicate(int count) {
-            using var duplicate = Start();
+            var duplicate = Start();
             if (!duplicate.WaitForExit(15000) || duplicate.ExitCode != 0) throw new Exception("Duplicate did not exit successfully");
             Wait(() => Lines("activated") >= count, "Existing window was not activated");
             if (Lines("created") != 1) throw new Exception("Duplicate created another launcher");
@@ -72,7 +73,9 @@ static class SingleInstanceTests
             Wait(() => File.Exists(Path.Combine(directory, "state")) && File.ReadAllText(Path.Combine(directory, "state")) == action, "Window command failed: " + action);
         }
         try {
-            var first = Start(); Duplicate(1);
+            var first = Start();
+            Wait(() => File.Exists(Path.Combine(directory, "owner")) && File.ReadAllText(Path.Combine(directory, "owner")) == first.Id.ToString(), "Primary did not acquire ownership");
+            Duplicate(1);
             Command("hide"); Duplicate(2);
             Command("minimize"); Duplicate(3);
             Command("exit"); Wait(() => first.HasExited, "Primary did not exit");
