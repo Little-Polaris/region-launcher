@@ -3,9 +3,9 @@ sealed class ApplicationEditor : Form
     readonly TextBox name = new() { Dock = DockStyle.Fill };
     readonly TextBox executable = new() { Dock = DockStyle.Fill };
     readonly TextBox arguments = new() { Dock = DockStyle.Fill };
-    readonly ComboBox country = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly ComboBox language = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly ComboBox timeZone = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    readonly SearchComboBox country = new() { Dock = DockStyle.Fill };
+    readonly SearchComboBox language = new() { Dock = DockStyle.Fill };
+    readonly SearchComboBox timeZone = new() { Dock = DockStyle.Fill };
     readonly CheckBox dst = new() { Text = "自动切换夏令时与标准时间", AutoSize = true };
     readonly Button save = new() { Text = "保存", AutoSize = true };
     readonly string id;
@@ -31,9 +31,9 @@ sealed class ApplicationEditor : Form
         };
         grid.Controls.Add(browse, 2, 1);
         grid.Controls.Add(new Label { Text = "启动参数", AutoSize = true }, 0, 2); grid.Controls.Add(arguments, 1, 2); grid.SetColumnSpan(arguments, 2);
-        country.Items.AddRange(WindowsSettings.Regions().Cast<object>().ToArray());
-        language.Items.AddRange(WindowsSettings.Languages().Cast<object>().ToArray());
-        timeZone.Items.AddRange(WindowsSettings.TimeZones().Cast<object>().ToArray());
+        country.SetOptions(WindowsSettings.Regions().Cast<object>().ToArray());
+        language.SetOptions(WindowsSettings.Languages().Cast<object>().ToArray());
+        timeZone.SetOptions(WindowsSettings.TimeZones().Cast<object>().ToArray());
         grid.Controls.Add(new Label { Text = "国家或地区", AutoSize = true }, 0, 3); grid.Controls.Add(country, 1, 3); grid.SetColumnSpan(country, 2);
         grid.Controls.Add(new Label { Text = "语言", AutoSize = true }, 0, 4); grid.Controls.Add(language, 1, 4); grid.SetColumnSpan(language, 2);
         grid.Controls.Add(new Label { Text = "时区", AutoSize = true }, 0, 5); grid.Controls.Add(timeZone, 1, 5); grid.SetColumnSpan(timeZone, 2);
@@ -53,8 +53,8 @@ sealed class ApplicationEditor : Form
         save.Click += (_, _) => {
             try {
                 var value = new LaunchApplication { Id = id, Name = name.Text.Trim(), Application = executable.Text.Trim(), Arguments = arguments.Text,
-                    Environment = new LaunchEnvironment { GeoId = ((RegionOption)country.SelectedItem!).GeoId, Locale = ((LanguageOption)language.SelectedItem!).Name,
-                        TimeZone = ((TimeZoneInfo)timeZone.SelectedItem!).Id, AutoDst = dst.Checked } };
+                    Environment = new LaunchEnvironment { GeoId = ((RegionOption)country.Value!).GeoId, Locale = ((LanguageOption)language.Value!).Name,
+                        TimeZone = ((TimeZoneInfo)timeZone.Value!).Id, AutoDst = dst.Checked } };
                 ApplicationLibrary.ValidateEntry(value);
                 if (!File.Exists(ApplicationLibrary.ResolvePath(value.Application))) throw new FileNotFoundException("程序不存在，请重新选择程序路径。");
                 Entry = value; DialogResult = DialogResult.OK;

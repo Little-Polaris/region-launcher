@@ -89,6 +89,7 @@ var ui = new Thread(() =>
         var language = (System.Windows.Forms.ComboBox)form.GetType().GetField("language", flags)!.GetValue(form)!;
         var zone = (System.Windows.Forms.ComboBox)form.GetType().GetField("timeZone", flags)!.GetValue(form)!;
         var dst = (System.Windows.Forms.CheckBox)form.GetType().GetField("dst", flags)!.GetValue(form)!;
+        SearchComboTests.Run(country, language, zone, Path.Combine(fixture, "applications.json"));
         software.SelectedIndex = 1;
         if (((TimeZoneInfo)zone.SelectedItem!).Id != "Tokyo Standard Time" || dst.Checked ||
             (int)country.SelectedItem!.GetType().GetProperty("GeoId")!.GetValue(country.SelectedItem)! != 122 ||

@@ -50,9 +50,9 @@ sealed class Launcher : Form
     readonly TextBox arguments = new() { Dock = DockStyle.Fill, ReadOnly = true };
     readonly TextBox proxyHost = new() { Text = "127.0.0.1", Width = 180 };
     readonly NumericUpDown proxyPort = new() { Minimum = 1, Maximum = 65535, Value = 7890, Width = 90 };
-    readonly ComboBox country = new() { Name = "Country", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly ComboBox language = new() { Name = "Language", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly ComboBox timeZone = new() { Name = "TimeZone", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    readonly SearchComboBox country = new() { Name = "Country", Dock = DockStyle.Fill };
+    readonly SearchComboBox language = new() { Name = "Language", Dock = DockStyle.Fill };
+    readonly SearchComboBox timeZone = new() { Name = "TimeZone", Dock = DockStyle.Fill };
     readonly Label timeNote = new() { AutoSize = true, Padding = new(0, 6, 0, 6) };
     readonly CheckBox dst = new() { Text = "自动切换夏令时与标准时间", Checked = true, AutoSize = true };
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
@@ -112,9 +112,9 @@ sealed class Launcher : Form
             if (dialog.ShowDialog(this) == DialogResult.OK) { dedicatedProxy.Dispose(); RefreshProxy(); Append("独立代理配置已保存；旧内核已停止，下次检测或启动使用新节点。"); }
         };
         proxy.Controls.Add(checkProxy); proxy.Controls.Add(configureProxy); grid.Controls.Add(proxy, 1, 5); grid.SetColumnSpan(proxy, 2);
-        country.Items.AddRange(WindowsSettings.Regions().Cast<object>().ToArray());
-        language.Items.AddRange(WindowsSettings.Languages().Cast<object>().ToArray());
-        timeZone.Items.AddRange(WindowsSettings.TimeZones().Cast<object>().ToArray());
+        country.SetOptions(WindowsSettings.Regions().Cast<object>().ToArray());
+        language.SetOptions(WindowsSettings.Languages().Cast<object>().ToArray());
+        timeZone.SetOptions(WindowsSettings.TimeZones().Cast<object>().ToArray());
         AddLabel(grid, "国家或地区", 6); grid.Controls.Add(country, 1, 6); grid.SetColumnSpan(country, 2);
         AddLabel(grid, "语言", 7); grid.Controls.Add(language, 1, 7); grid.SetColumnSpan(language, 2);
         AddLabel(grid, "时区", 8); grid.Controls.Add(timeZone, 1, 8); grid.SetColumnSpan(timeZone, 2);
@@ -243,9 +243,9 @@ sealed class Launcher : Form
         SaveSoftwareList(applicationList with { SelectedId = entries.FirstOrDefault()?.Id, Applications = entries });
     }
     LaunchEnvironment ReadSettings() => new() {
-        GeoId = (country.SelectedItem as RegionOption)?.GeoId ?? 244,
-        Locale = (language.SelectedItem as LanguageOption)?.Name ?? "en-US",
-        TimeZone = (timeZone.SelectedItem as TimeZoneInfo)?.Id ?? "Pacific Standard Time", AutoDst = dst.Checked
+        GeoId = (country.Value as RegionOption)?.GeoId ?? 244,
+        Locale = (language.Value as LanguageOption)?.Name ?? "en-US",
+        TimeZone = (timeZone.Value as TimeZoneInfo)?.Id ?? "Pacific Standard Time", AutoDst = dst.Checked
     };
     void SaveSettings()
     {
@@ -263,6 +263,7 @@ sealed class Launcher : Form
     void ApplySettings(LaunchEnvironment profile)
     {
         loadingSettings = true;
+        country.ResetFilter(); language.ResetFilter(); timeZone.ResetFilter();
         country.SelectedItem = country.Items.Cast<RegionOption>().FirstOrDefault(r => r.GeoId == profile.GeoId) ?? country.Items.Cast<RegionOption>().First(r => r.GeoId == 244);
         language.SelectedItem = language.Items.Cast<LanguageOption>().FirstOrDefault(l => l.Name.Equals(profile.Locale, StringComparison.OrdinalIgnoreCase)) ?? language.Items.Cast<LanguageOption>().First(l => l.Name == "en-US");
         timeZone.SelectedItem = timeZone.Items.Cast<TimeZoneInfo>().FirstOrDefault(z => z.Id == profile.TimeZone) ?? timeZone.Items.Cast<TimeZoneInfo>().First(z => z.Id == "Pacific Standard Time");
@@ -271,7 +272,7 @@ sealed class Launcher : Form
     }
     void UpdateTimeNote()
     {
-        if (timeZone.SelectedItem is not TimeZoneInfo zone) return;
+        if (timeZone.Value is not TimeZoneInfo zone) return;
         TimeSpan offset = dst.Checked ? zone.GetUtcOffset(DateTime.UtcNow) : zone.BaseUtcOffset;
         string sign = offset < TimeSpan.Zero ? "−" : "+";
         timeNote.Text = $"{(dst.Checked ? "按 Windows 时区规则自动切换" : "全年使用标准时间")}；当前 UTC{sign}{offset.Duration():hh\\:mm}。";
@@ -327,7 +328,7 @@ sealed class Launcher : Form
             start.Enabled = false; await CheckProxy();
             var settings = selected.Environment ?? throw new IOException("所选软件缺少地区设置，请重新编辑并保存。");
             settings.Validate();
-            var region = country.Items.Cast<RegionOption>().Single(r => r.GeoId == settings.GeoId);
+            var region = WindowsSettings.Regions().Single(r => r.GeoId == settings.GeoId);
             var profile = new Profile { GeoId = settings.GeoId, Locale = settings.Locale, TimeZone = settings.TimeZone, Application = selected.Application, Arguments = selected.Arguments, ProxyHost = proxyHost.Text.Trim(), ProxyPort = (int)proxyPort.Value, AutoDst = settings.AutoDst };
             Append($"软件环境：{selected.Name}；地区={region.Code}，语言={settings.Locale}，时区={settings.TimeZone}，自动冬夏时间={settings.AutoDst}。");
             File.WriteAllText(Path.Combine(data, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
