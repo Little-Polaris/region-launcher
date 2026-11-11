@@ -22,7 +22,7 @@ public final class RegionVpnService extends VpnService {
     private Set<String> activeApps=Set.of();
     private String config;
     private int port;
-    private long lastRepair;
+    private final Recovery recovery=new Recovery();
     private volatile boolean stopping;
     private Journal journal;
     private NotificationManager notifications;
@@ -74,20 +74,19 @@ public final class RegionVpnService extends VpnService {
             if(!config.equals(ProxyConfig.build(node,port))) throw new IOException("运行期间节点发生变化；请先停止连接再切换节点");
             ProfilePolicy.lock(this);
         }
-        List<Health.Result> first=Health.check(port,journal);
-        if(!Health.usable(first)) {
-            Thread.sleep(2000);if(stopping)return;
-            first=Health.check(port,journal);
-            if(!Health.usable(first)) {
-                if(SystemClock.elapsedRealtime()-lastRepair<60000&&lastRepair!=0)throw new IOException("实际联网仍失败；距上次重连不足一分钟，请稍后重试");
-                lastRepair=SystemClock.elapsedRealtime();journal.write("连续两轮联网失败，重建代理连接；保留 VPN 接口及应用");
-                NativeCore.stop();startCore();first=Health.check(port,journal);
-                if(!Health.usable(first))throw new IOException("重连后仍无法联网；保护接口保留，目标应用未启动");
-            }
-        }
-        if(stopping)return;
-        Health.match(first,Health.check(null,journal));
+        recovery.check(this::verifyConnection,()->{
+            if(stopping)throw new InterruptedException("操作已取消");
+            journal.write("连续两轮实际联网验证失败，重建代理和转发通道；保留 VPN 接口及应用");
+            NativeCore.stop();startCore();
+        });
         journal.write("指定代理与环境内 HTTPS 出口验证通过");
+    }
+    private void verifyConnection()throws Exception{
+        if(stopping)throw new InterruptedException("操作已取消");
+        List<Health.Result> proxy=Health.check(port,journal);
+        if(!Health.usable(proxy))throw new IOException("指定代理无法完成 HTTPS 请求");
+        if(stopping)throw new InterruptedException("操作已取消");
+        Health.match(proxy,Health.check(null,journal));
     }
     private void startCore() throws IOException {
         if(stopping)throw new IOException("操作已取消");

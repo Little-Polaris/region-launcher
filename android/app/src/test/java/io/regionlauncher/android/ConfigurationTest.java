@@ -50,4 +50,11 @@ public class ConfigurationTest {
         assertThrows(IOException.class,()->Health.match(proxy,List.of(new Health.Result("probe",true,"198.51.100.1",10,""))));
         assertThrows(IOException.class,()->Health.match(proxy,List.of(new Health.Result("probe",false,"",10,"timeout"))));
     }
+    @Test public void onlyAcceptsExplicitExitAddressFields()throws Exception{
+        assertEquals("203.0.113.7",Health.extractIp("my.ip.cn","<p>ip：<span>203.0.113.7</span> 归属地：测试</p>"));
+        assertEquals("203.0.113.7",Health.extractIp("www.cloudflare.com","h=www.cloudflare.com\nip=203.0.113.7\n"));
+        assertThrows(IOException.class,()->Health.extractIp("my.ip.cn","请访问 203.0.113.7 联系客服"));
+        assertThrows(IOException.class,()->Health.extractIp("www.cloudflare.com","ip=203.0.113.7\nip=198.51.100.1\n"));
+        assertThrows(IOException.class,()->Health.extractIp("www.cloudflare.com","ip=999.0.113.7\n"));
+    }
 }

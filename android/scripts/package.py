@@ -38,7 +38,7 @@ def package(java,sdk):
         for abi in manifest['abis']:
             assert archive.read(f'lib/{abi}/libregioncore.so')==(ANDROID/f'app/src/main/jniLibs/{abi}/libregioncore.so').read_bytes(), 'APK has a stale native library'
     metadata=json.loads((apk.parent/'output-metadata.json').read_text(encoding='utf-8'))
-    manifest.update(source_commit=revision,version=metadata['elements'][0]['versionName'],unit_tests=count,runtime_verified=False,
+    manifest.update(apk='RegionLauncher-Android-dev.apk',source_commit=revision,version=metadata['elements'][0]['versionName'],unit_tests=count,runtime_verified=False,
         runtime_limit='No attached device; software emulator crashed before Android boot. X300 verification pending.',
         signature=signature.strip().splitlines())
     out=ROOT.parent.parent/'outputs/region-launcher-unified/packages/android';out.mkdir(parents=True,exist_ok=True)
