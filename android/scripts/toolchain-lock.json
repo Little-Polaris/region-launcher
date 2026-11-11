@@ -1,0 +1,7 @@
+{
+  "go": {"url":"https://go.dev/dl/go1.26.11.windows-amd64.zip","hash":"71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0","algorithm":"sha256"},
+  "ndk": {"url":"https://dl.google.com/android/repository/android-ndk-r28c-windows.zip","hash":"086bba43ff2f5eb0e387b15c8278bb4e0d89ba1d","algorithm":"sha1"},
+  "image": {"url":"https://dl.google.com/android/repository/sys-img/google_apis/x86_64-ps16k-37.0_r08.zip","hash":"3e04f6c168a573640e63fdd8afd71a3c4d947f64","algorithm":"sha1"},
+  "arm-image": {"url":"https://dl.google.com/android/repository/sys-img/google_apis/arm64-v8a-37.0_r08.zip","hash":"7a8bfff584798fe87caa4d4883f6ade4658a185b","algorithm":"sha1"},
+  "commandline": {"url":"https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip","hash":"57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d","algorithm":"sha1"}
+}

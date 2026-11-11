@@ -1,0 +1,9 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+app/src/main/jniLibs/
+*.jks
+*.keystore
+.private/
+__pycache__/
