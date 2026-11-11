@@ -1,12 +1,16 @@
 using System.Reflection;
 using System.Text.Json;
 
+// A fixture failure must reach the test runner, never leave a desktop error dialog.
+System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException, false);
+
 if (args.Length == 2 && args[0] == "--launch-result") {
     if (args[1] == "started") Console.WriteLine("STARTED PID=" + Environment.ProcessId);
     else Console.Error.WriteLine("Application was not started: fixture rejection");
     Environment.ExitCode = 17; return;
 }
 if (args.Length == 4 && args[0] == "--single-fixture") { SingleInstanceTests.Fixture(args); return; }
+if (args.Length == 3 && args[0] == "--single-test") { SingleInstanceTests.Run(args[1], args[2]); return; }
 if (args.Length > 0 && args[0] == "--tray-leaf") { Thread.Sleep(Timeout.Infinite); return; }
 if (args.Length == 2 && args[0] == "--tray-fixture") {
     using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
@@ -47,6 +51,7 @@ var ui = new Thread(() =>
 {
     try
     {
+        System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException);
         System.Windows.Forms.Application.EnableVisualStyles();
         using var form = (System.Windows.Forms.Form)OpenLauncher();
         form.GetType().GetMethod("ApplySettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new[] { Activator.CreateInstance(assembly.GetType("LaunchEnvironment")!, true) });

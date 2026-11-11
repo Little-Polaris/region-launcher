@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 
@@ -58,7 +57,7 @@ sealed class Launcher : Form
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     readonly Button start = new() { Text = "启动所选程序", AutoSize = true };
     readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
-    readonly Button checkProxy = new() { Text = "检测联网", AutoSize = true };
+    readonly Button checkProxy = new() { Text = "检测并修复", AutoSize = true };
     readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
     bool preparing;
     bool exiting, allowClose;
@@ -74,6 +73,7 @@ sealed class Launcher : Form
     bool loadingSoftware;
     bool loadingSettings;
     readonly DedicatedProxy dedicatedProxy;
+    readonly ProxyRecovery proxyRecovery;
     readonly DiagnosticLog? diagnostics;
     Process? session;
     string? currentJob;
@@ -85,6 +85,8 @@ sealed class Launcher : Form
         string? logError = null;
         try { diagnostics = new(Path.Combine(data, "logs")); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logError = ex.Message; }
         dedicatedProxy = new(Append, values => diagnostics?.AddSecrets(values));
+        proxyRecovery = new(dedicatedProxy.EnsureStarted, dedicatedProxy.RestartAsync,
+            ct => ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: ct), Append);
         Text = "Region Launcher · 环境验证版"; ClientSize = new(840, 760); MinimumSize = new(750, 710);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), ColumnCount = 3, RowCount = 14 };
@@ -166,7 +168,7 @@ sealed class Launcher : Form
             shutdown.Cancel();
             StopSession();
         };
-        dedicatedProxy.UnexpectedExit += () => { StopSession(); Append("独立代理已退出，正在结束本次运行；不会切回 7890。"); };
+        dedicatedProxy.UnexpectedExit += () => Append("独立代理内核已退出；已启动的软件和网络隔离保留。点击“检测并修复”或启动新程序时将重新连接代理。");
         Directory.CreateDirectory(data);
         try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); ApplySettings(new LaunchEnvironment { GeoId = p.GeoId, Locale = p.Locale, TimeZone = p.TimeZone, AutoDst = p.AutoDst }); } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
         try { applicationList = library.Load(executable.Text, arguments.Text, ReadSettings()); RefreshSoftware(); }
@@ -323,17 +325,9 @@ sealed class Launcher : Form
     async Task CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
-        Append("开始检测：固定出口规则 → SOCKS5 握手 → 代理实际联网 → 环境内实际联网。");
-        await dedicatedProxy.EnsureStarted();
-        shutdown.Token.ThrowIfCancellationRequested();
+        Append("开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。");
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token); cts.CancelAfter(TimeSpan.FromSeconds(5));
-        using var client = new TcpClient(); await client.ConnectAsync(proxyHost.Text.Trim(), (int)proxyPort.Value, cts.Token);
-        var stream = client.GetStream(); await stream.WriteAsync(new byte[] { 5, 1, 0 }, cts.Token);
-        byte[] answer = new byte[2]; await stream.ReadExactlyAsync(answer, cts.Token);
-        if (answer[0] != 5 || answer[1] != 0) throw new IOException("此版本需要无需认证的 SOCKS5 代理。");
-        Append("SOCKS5 握手通过，正在验证 HTTPS 和出口地址。");
-        var throughProxy = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: shutdown.Token);
+        var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token);
         shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
         var inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token);

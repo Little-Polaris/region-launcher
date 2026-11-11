@@ -27,6 +27,13 @@ static class TrayTests {
             using var root = Process.GetProcessById(ids[0]); using var child = Process.GetProcessById(ids[1]);
             type.GetField("session", Hidden)!.SetValue(form, session);
             type.GetField("currentJob", Hidden)!.SetValue(form, job);
+            var proxy = type.GetField("dedicatedProxy", Hidden)!.GetValue(form)!;
+            ((Action)proxy.GetType().GetField("UnexpectedExit", Hidden)!.GetValue(proxy)!)();
+            Application.DoEvents(); Thread.Sleep(150);
+            Check(!session.HasExited && !root.HasExited && !child.HasExited && !outside.HasExited,
+                "Unexpected proxy exit terminated running applications");
+            Check(((Button)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Text == "检测并修复", "Recovery button missing");
+            Console.WriteLine("PASS: unexpected proxy exit preserves existing root/child job and outside process");
             type.GetField("preparing", Hidden)!.SetValue(form, true);
             form.Close(); Application.DoEvents();
             Check(!form.Visible && !form.IsDisposed && tray.Visible && !session.HasExited && !root.HasExited && !child.HasExited, "Closing window stopped background work");

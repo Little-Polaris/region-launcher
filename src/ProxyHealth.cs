@@ -49,7 +49,7 @@ static class ProxyHealth
     }
     public static void RequireInternet(ProbeResult[] results)
     {
-        if (!results.Any(r => r.Ok)) throw new IOException("SOCKS5 可用，但实际 HTTPS 联网检测未通过；程序没有启动。请检查节点、订阅余额或节点可用性。");
+        if (!results.Any(r => r.Ok)) throw new IOException("实际 HTTPS 联网检测未通过；本次新程序没有启动。请查看检测日志，检查节点或网络连接。");
     }
     public static void RequireMatchingExit(ProbeResult[] proxy, ProbeResult[] environment)
     {

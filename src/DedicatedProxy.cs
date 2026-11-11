@@ -36,19 +36,26 @@ sealed class DedicatedProxy : IDisposable
         }
     }
 
-    public async Task EnsureStarted()
+    public Task EnsureStarted(CancellationToken cancellationToken = default) => StartCore(false, cancellationToken);
+    public Task RestartAsync(CancellationToken cancellationToken = default) => StartCore(true, cancellationToken);
+
+    async Task StartCore(bool restart, CancellationToken cancellationToken)
     {
-        await gate.WaitAsync();
+        await gate.WaitAsync(cancellationToken);
         bool starting = false;
         try
         {
             ProxyConfiguration.ValidateRuntimePolicy(config);
             string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(config)));
+            // A recovery must keep the original node, listeners and DNS for the existing group.
+            if (fingerprint != null && hash != fingerprint)
+                throw new IOException("代理配置在运行期间发生变化，请恢复原配置，或退出环境后重新配置。");
             if (process is { HasExited: false }) {
-                if (hash != fingerprint) throw new IOException("代理配置在运行期间发生变化，请结束环境并重新打开启动器后检测。");
-                return;
+                if (!restart) return;
+                log($"[代理修复] 重启本启动器持有的内核 PID={process.Id}，运行时长={(DateTime.Now - process.StartTime).TotalSeconds:F0} 秒，内存={process.WorkingSet64 / 1048576} MiB，句柄={process.HandleCount}；保持节点、代理端口和 DNS 不变。");
             }
-            Dispose();
+            cancellationToken.ThrowIfCancellationRequested();
+            StopCore();
             starting = true;
             var dnsIp = IPAddress.Parse(DnsAddress);
             using (var dnsUdp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
@@ -62,7 +69,8 @@ sealed class DedicatedProxy : IDisposable
             Register(runtime);
             runtime["log-level"] = "info";
             runtimeConfig = Path.Combine(Path.GetDirectoryName(config)!, $"runtime-{Environment.ProcessId}.json");
-            await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString());
+            await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString(), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var psi = new ProcessStartInfo(EnginePath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             psi.ArgumentList.Add("-d"); psi.ArgumentList.Add(Path.GetDirectoryName(config)!);
             psi.ArgumentList.Add("-f"); psi.ArgumentList.Add(runtimeConfig);
@@ -76,18 +84,18 @@ sealed class DedicatedProxy : IDisposable
             log($"独立代理内核已启动，PID={candidate.Id}，SOCKS5=127.0.0.1:{Port}，DNS={DnsAddress}:53，规则=MATCH,RegionExit");
             for (int i = 0; i < 50; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (candidate.HasExited) throw new IOException("独立代理内核启动失败，请检查节点配置。");
                 using var socket = new TcpClient();
                 try {
-                    await socket.ConnectAsync(IPAddress.Loopback, Port);
-                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53); return;
+                    await socket.ConnectAsync(IPAddress.Loopback, Port, cancellationToken);
+                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53, cancellationToken); return;
                 }
-                catch (SocketException) { await Task.Delay(100); }
+                catch (SocketException) { await Task.Delay(100, cancellationToken); }
             }
-            Dispose();
             throw new IOException("独立代理内核未就绪，程序没有启动。");
         }
-        catch { if (starting) Dispose(); throw; }
+        catch { if (starting) StopCore(); throw; }
         finally { gate.Release(); }
     }
 
@@ -107,6 +115,10 @@ sealed class DedicatedProxy : IDisposable
     }
 
     public void Dispose()
+    {
+        StopCore(); fingerprint = null;
+    }
+    void StopCore()
     {
         var old = process; process = null;
         if (old != null) {

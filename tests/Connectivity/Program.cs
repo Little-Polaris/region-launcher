@@ -6,8 +6,12 @@ using System.Text.Json.Nodes;
 using System.Diagnostics;
 
 if (args.Length == 1 && args[0] == "--hold") { await Task.Delay(60000); return; }
+if (args.Length == 2 && args[0] == "--recovery-child") { await RecoveryLive.Child(args[1]); return; }
 
 string folder = Path.GetFullPath(args[0]); Directory.CreateDirectory(folder);
+if (args.Length >= 4 && args[1] == "--recovery-live") {
+    await RecoveryLive.Run(folder, Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); return;
+}
 if (args.Length >= 4 && args[1] == "--live") {
     string bin = Path.GetFullPath(args[2]);
     using var logs = new DiagnosticLog(Path.Combine(folder, "logs"));
@@ -50,6 +54,7 @@ foreach (string mode in new[] { "reject", "invalid", "success", "timeout" }) {
     Assert(socks.Handshake, "SOCKS handshake not attempted");
 }
 var good = new ProbeResult("fixture", "fixture.test", true, 10, 200, "203.0.113.7", "US", null);
+await RecoveryTests.Run(good);
 using (var socks = new FakeSocks("timeout")) {
     using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
     var elapsed = Stopwatch.StartNew();
@@ -64,6 +69,7 @@ foreach (var bad in new[] { good with { Ip = "203.0.113.8" }, good with { Host =
 string configPath = Path.Combine(folder, "fixture-proxy.json");
 var config = ProxyConfiguration.Build(new JsonObject { ["type"] = "hysteria2", ["server"] = "192.0.2.1", ["port"] = 443, ["password"] = "fixture-password" }, 17890);
 await File.WriteAllTextAsync(configPath, config.ToJsonString()); ProxyConfiguration.ValidateRuntimePolicy(configPath);
+await ProxyOwnershipTests.Run(configPath);
 config["rules"] = new JsonArray("MATCH,DIRECT");
 await File.WriteAllTextAsync(configPath, config.ToJsonString());
 try { ProxyConfiguration.ValidateRuntimePolicy(configPath); throw new Exception("Direct routing accepted"); } catch (IOException) { }
@@ -101,6 +107,7 @@ sealed class FakeSocks : IDisposable
             if (mode == "timeout") { await Task.Delay(10000, cancel.Token); return; }
             await stream.WriteAsync(new byte[] { 5, (byte)(mode == "reject" ? 5 : 0), 0, 1, 0, 0, 0, 0, 0, 0 }, cancel.Token);
             if (mode == "reject") return;
+            if (mode == "stall") { await Task.Delay(10000, cancel.Token); return; }
             var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, true);
             while (await reader.ReadLineAsync(cancel.Token) is string line && line.Length > 0) { }
             string body = mode == "success" ? "ip=203.0.113.7\nloc=US\n" : "<html>not an IP response</html>";
