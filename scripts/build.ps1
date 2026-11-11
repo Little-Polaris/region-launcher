@@ -28,7 +28,7 @@ try {
     RunCompiler (@('/nologo','/c','/O2','/MT','/EHsc','/DDETOURS_X64',"/I$detours") + $sources)
     & lib.exe /nologo /OUT:detours.lib detours.obj modules.obj disasm.obj image.obj creatwth.obj disolx86.obj disolx64.obj disolia64.obj disolarm.obj disolarm64.obj
     if ($LASTEXITCODE) { throw 'Detours library failed' }
-    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours",(Join-Path $root 'src/RegionHook.cpp'),(Join-Path $root 'src/UnifiedDns.cpp'),(Join-Path $root 'src/SystemProxy.cpp'),(Join-Path $root 'src/SystemProxyWinInet.cpp'),(Join-Path $root 'src/ConnectHooks.cpp'),(Join-Path $root 'src/DatagramHooks.cpp'),'/LD','/link','detours.lib','advapi32.lib','dnsapi.lib','ws2_32.lib','iphlpapi.lib','winhttp.lib','wininet.lib',"/DEF:$(Join-Path $root 'src/RegionHook.def')",'/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionHook.dll")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours",(Join-Path $root 'src/RegionHook.cpp'),(Join-Path $root 'src/UnifiedDns.cpp'),(Join-Path $root 'src/SystemProxy.cpp'),(Join-Path $root 'src/SystemProxyWinInet.cpp'),(Join-Path $root 'src/ConnectHooks.cpp'),(Join-Path $root 'src/DatagramHooks.cpp'),'/LD','/link','detours.lib','advapi32.lib','dnsapi.lib','ws2_32.lib','iphlpapi.lib','winhttp.lib','wininet.lib','shell32.lib','user32.lib',"/DEF:$(Join-Path $root 'src/RegionHook.def')",'/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionHook.dll")
     $sources = Get-ChildItem -LiteralPath $pb -Filter '*.c' | ForEach-Object FullName
     RunCompiler (@('/nologo','/O2','/MT','/utf-8','/DPROXYBRIDGE_EXPORTS','/D_CRT_SECURE_NO_WARNINGS','/D_WINSOCK_DEPRECATED_NO_WARNINGS',"/I$wd/include") + $sources + @('/LD','/link',"/LIBPATH:$wd/x64",'WinDivert.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/ProxyBridgeCore.dll"))
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours", "/I$pb",(Join-Path $root 'src/Session.cpp'),(Join-Path $root 'src/ConnectBroker.cpp'),'/link','detours.lib','shell32.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionSession.exe")
@@ -38,6 +38,7 @@ try {
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/DatagramProbe.cpp'),'/link','ws2_32.lib',"/OUT:$build/DatagramProbe.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',"/I$detours","/I$root/src",(Join-Path $root 'tests/ConnectHarness.cpp'),(Join-Path $root 'src/ConnectBroker.cpp'),'/link','detours.lib','ws2_32.lib','iphlpapi.lib','advapi32.lib',"/OUT:$build/ConnectHarness.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/ChildEnvironment.cpp'),'/link',"/OUT:$build/ChildEnvironmentTest.exe")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/LinkProbe.cpp'),'/link','shell32.lib','user32.lib',"/OUT:$build/LinkProbe.exe")
     foreach ($file in @('WinDivert.dll','WinDivert64.sys')) {
         $source = Join-Path "$wd/x64" $file; $target = Join-Path $bin $file
         if (!(Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {

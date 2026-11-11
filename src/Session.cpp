@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string>
 #include <vector>
+#include <filesystem>
 #include "NetworkProtocol.h"
 #include "UnicodeInjection.h"
 #include "ConnectBroker.h"
@@ -23,6 +24,39 @@ static std::wstring quote(const std::wstring& value) {
         slashes = 0; out += c;
     }
     out.append(slashes * 2, L'\\'); return out + L'\"';
+}
+static void cleanupLinkProfiles(const std::wstring& job) {
+    namespace fs = std::filesystem;
+    auto temp = get(L"LinkBrowser_TEMP");
+    const std::wstring prefix = L"Local\\RegionLauncher.";
+    if (temp.empty() || job.rfind(prefix, 0) != 0) return;
+    auto id = job.substr(prefix.size());
+    if (id.size() != 32 || id.find_first_not_of(L"0123456789abcdefABCDEF") != std::wstring::npos) return;
+    fs::path target = fs::path(temp).parent_path();
+    if (!target.is_absolute() || target.filename() != id || target.parent_path().filename() != L"link-browser-temp") return;
+    // Never follow a junction anywhere along the temporary profile path.
+    for (auto p = target; !p.empty(); p = p.parent_path()) {
+        DWORD attributes = GetFileAttributesW(p.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return;
+        if (p == p.parent_path()) break;
+    }
+    auto erase = [&](auto&& self, const fs::path& path) -> bool {
+        DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) return true;
+        if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) return DeleteFileW(path.c_str()) != 0;
+        if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            std::error_code ec;
+            for (fs::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
+                if (!self(self, it->path())) return false;
+            if (ec) return false;
+        }
+        return RemoveDirectoryW(path.c_str()) != 0;
+    };
+    for (int retry = 0; retry < 20; ++retry) {
+        if (erase(erase, target)) return;
+        Sleep(100);
+    }
+    fwprintf(stderr, L"[LinkBrowser] temporary profile cleanup deferred\n");
 }
 static std::string utf8(const std::wstring& value) {
     int n = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -112,6 +146,12 @@ static bool configureEnvironment() {
     SetEnvironmentVariableW(L"REGION_LAUNCHER_GEO", geoText.c_str());
     SetEnvironmentVariableW(L"REGION_LAUNCHER_DST", automatic.c_str());
     SetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", get(L"DnsAddress").empty() ? nullptr : get(L"DnsAddress").c_str());
+    SetEnvironmentVariableW(L"REGION_LAUNCHER_JOB", get(L"Job").c_str());
+    for (auto key : {L"ENABLED", L"EXE", L"PROFILE", L"TEMP", L"PROFILE_NAME"}) {
+        auto name = std::wstring(L"REGION_LAUNCHER_LINK_") + key;
+        auto value = get((std::wstring(L"LinkBrowser_") + key).c_str());
+        SetEnvironmentVariableW(name.c_str(), value.empty() ? nullptr : value.c_str());
+    }
     SetEnvironmentVariableW(L"TZ", tz);
     for (WCHAR& c : selectedLocale) if (c == L'-') c = L'_';
     selectedLocale += L".UTF-8";
@@ -199,6 +239,7 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
     GetExitCodeProcess(pi.hProcess, &rootExit); requestStop();
     if (engine) { WaitForSingleObject(engine, 10000); CloseHandle(engine); }
     StopConnectBroker();
+    if (!joining) cleanupLinkProfiles(name);
     CloseHandle(pi.hProcess); CloseHandle(sessionJob); CloseHandle(ready); CloseHandle(stop);
     if (owner) CloseHandle(owner);
     return rootExit == STILL_ACTIVE ? 1 : (int)rootExit;

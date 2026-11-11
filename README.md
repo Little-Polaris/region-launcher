@@ -1,8 +1,8 @@
-# Region Launcher 0.3.0-alpha.12
+# Region Launcher 0.3.0-alpha.13
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
 
-0.3.0-alpha.12 修复统一 DNS 接管将 `localhost` 当作公网域名查询，导致桌面软件本地授权回调失败的问题。Windows 名称解析接口现在直接返回 IPv4 回环地址，继续禁止 AAAA；不修改 hosts 或宿主 DNS。覆盖 Windows API、Node 本地回调与普通 DNS 隔离回归测试。ChatGPT 日志已明确出现该错误，完整跨设备连接仍需重启应用后验收。见 [本地回调 DNS 修复](docs/localhost-callback.md)。无需更新后台服务。
+0.3.0-alpha.13 增加环境内打开授权链接的 Chrome / Edge 选择：优先使用软件列表中的独立资料，同一运行环境内已经打开的浏览器可以复用；没有独立资料或被其他环境占用时，使用临时资料和无痕窗口。新增“授权浏览器…”设置，见 [授权浏览器](docs/link-browser.md)。无需更新后台服务。
 
 0.3.0-alpha.11 修复程序为子进程指定自定义环境变量时，丢失启动器参数并报 DLL 初始化失败（1114）的问题。保留本次运行的地区、DNS 和连接通道，支持 ANSI/Unicode 环境块；不向自定义环境复制其他父进程变量。ChatGPT 辅助组件出现了同类错误，真实远程连接仍待重启应用复查。当前通道已通过加密 WebSocket 握手、回显及空闲后续传测试。见 [子进程与 WebSocket 验证](docs/child-environment-websocket.md)。无需更新后台服务。
 

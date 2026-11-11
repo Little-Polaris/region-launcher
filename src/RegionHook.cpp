@@ -8,6 +8,7 @@
 #include "UnicodeInjection.h"
 #include "ConnectBroker.h"
 #include "ChildEnvironment.h"
+#include "LinkHooks.h"
 
 static const ChildEnvironment::Values* childEnvironment;
 
@@ -182,6 +183,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", nullptr, 0) &&
         (!AttachSystemProxyHooks() || !AttachConnectHooks())) status = ERROR_INVALID_FUNCTION;
     if (!AttachIPv4Hooks()) status = ERROR_INVALID_FUNCTION;
+    if (GetEnvironmentVariableW(L"REGION_LAUNCHER_LINK_ENABLED", nullptr, 0) && !LinkHooks::attach()) status = ERROR_INVALID_FUNCTION;
 #define HOOK(old, replacement) if (DetourAttach(&(PVOID&)(old), replacement) != NO_ERROR) status = ERROR_INVALID_FUNCTION
     if (GetEnvironmentVariableW(L"REGION_LAUNCHER_DNS_ADDRESS", nullptr, 0)) {
         if (!AttachUnifiedDnsHooks()) status = ERROR_INVALID_FUNCTION;

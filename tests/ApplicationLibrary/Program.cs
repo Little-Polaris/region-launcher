@@ -53,4 +53,5 @@ foreach (var bad in new[] { japan with { GeoId = -1 }, japan with { Locale = "ba
 }
 File.Delete(path);
 Console.WriteLine("PASS: independent per-app environments, old-list migration, one-time defaults and invalid region preservation");
+LinkBrowserTests.Run();
 Console.WriteLine("PASS: legacy migration, Unicode/quoted arguments, two entries for one executable, edit/delete/reopen/selection, invalid save preservation, malformed file preservation, relative/environment paths");

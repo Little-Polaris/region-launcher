@@ -60,6 +60,7 @@ sealed class Launcher : Form
     readonly Button stop = new() { Text = "结束本次运行", Enabled = false, AutoSize = true };
     readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
     readonly Button checkProxy = new() { Text = "检测联网", AutoSize = true };
+    readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
     bool preparing;
     readonly string data;
     readonly ApplicationLibrary library;
@@ -137,6 +138,11 @@ sealed class Launcher : Form
             catch (Exception ex) { Append("无法打开日志目录：" + ex.Message); }
         };
         buttons.Controls.Add(openLogs);
+        buttons.Controls.Add(linkBrowser);
+        linkBrowser.Click += (_, _) => {
+            try { using var dialog = new LinkBrowserDialog(data, applicationList); if (dialog.ShowDialog(this) == DialogResult.OK) Append("授权链接浏览器已保存，下次启动程序生效。"); }
+            catch (Exception ex) { Append("授权浏览器配置读取失败：" + ex.Message); }
+        };
         grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
         ApplySettings(new LaunchEnvironment());
         start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
@@ -185,6 +191,7 @@ sealed class Launcher : Form
         editSoftware.Enabled = removeSoftware.Enabled = start.Enabled;
         stop.Enabled = session != null;
         configureProxy.Enabled = session == null && !preparing;
+        linkBrowser.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;
         country.Enabled = language.Enabled = timeZone.Enabled = dst.Enabled = start.Enabled;
     }
@@ -329,6 +336,9 @@ sealed class Launcher : Form
             string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(profile.AutoDst ? 1 : 0)}\r\n";
             File.WriteAllText(config, ini, Encoding.Unicode);
             File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
+            var browserPlan = LinkBrowser.Prepare(data, currentJob!, settings, applicationList!);
+            File.AppendAllText(config, browserPlan.Ini, Encoding.Unicode);
+            Append(browserPlan.Executable == "" ? "未找到 Chrome / Edge；环境内打开网页将提示失败，请安装浏览器后重试。" : "授权链接使用环境内浏览器：" + Path.GetFileName(browserPlan.Executable) + (browserPlan.Profile == "" ? "；临时无痕资料。" : "；优先使用软件列表的独立资料。"));
             var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "RegionSession.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             psi.ArgumentList.Add(join ? "--join" : "--run"); psi.ArgumentList.Add(config);
             var candidate = new Process { StartInfo = psi };

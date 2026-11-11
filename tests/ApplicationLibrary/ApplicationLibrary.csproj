@@ -4,7 +4,9 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup><Compile Include="../../src/ApplicationLibrary.cs" Link="ApplicationLibrary.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../src/LinkBrowser.cs" Link="LinkBrowser.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../src/LaunchEnvironment.cs" Link="LaunchEnvironment.cs" /><Compile Include="../../src/WindowsSettings.cs" Link="WindowsSettings.cs" /></ItemGroup>
 </Project>

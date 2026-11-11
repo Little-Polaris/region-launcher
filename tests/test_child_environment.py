@@ -20,6 +20,9 @@ def child():
     assert os.environ['LC_ALL'] == 'en_US.UTF-8'
     assert os.environ['CUSTOM_VALUE'] == '中文 空格 🚀'
     assert 'PARENT_ONLY_TEST_SECRET' not in os.environ
+    assert os.environ['REGION_LAUNCHER_JOB'].startswith('Local\\RegionLauncher.')
+    assert os.environ['REGION_LAUNCHER_LINK_ENABLED'] == '1'
+    assert os.environ['REGION_LAUNCHER_LINK_EXE'] == 'fixture-browser.exe'
     print('CHILD_ENV_OK', flush=True)
 
 
@@ -46,6 +49,8 @@ Region=US
 Geo=244
 TimeZone=Pacific Standard Time
 AutoDst=1
+LinkBrowser_ENABLED=1
+LinkBrowser_EXE=fixture-browser.exe
 ''', encoding='utf-16')
     p = subprocess.run([str(BIN/'RegionSession.exe'), '--locale-test', str(config)], capture_output=True, timeout=60)
     text = (p.stdout + p.stderr).decode('utf-8', errors='replace')

@@ -39,6 +39,10 @@ var ui = new Thread(() =>
         form.Location = new System.Drawing.Point(-32000, -32000); form.ShowInTaskbar = false;
         form.Show(); System.Windows.Forms.Application.DoEvents();
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        using (var links = (System.Windows.Forms.Form)Activator.CreateInstance(assembly.GetType("LinkBrowserDialog")!, new object[] { fixture, null })!) {
+            links.StartPosition = System.Windows.Forms.FormStartPosition.Manual; links.Location = new(-32000, -32000); links.ShowInTaskbar = false;
+            links.Show(); System.Windows.Forms.Application.DoEvents(); Snapshot(links, "link-browser.png"); links.Close();
+        }
         var software = (System.Windows.Forms.ComboBox)form.GetType().GetField("software", flags)!.GetValue(form)!;
         var executable = (System.Windows.Forms.TextBox)form.GetType().GetField("executable", flags)!.GetValue(form)!;
         var arguments = (System.Windows.Forms.TextBox)form.GetType().GetField("arguments", flags)!.GetValue(form)!;
