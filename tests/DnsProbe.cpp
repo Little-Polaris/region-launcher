@@ -130,6 +130,18 @@ int wmain(int argc, wchar_t** argv) {
         status = result.QueryStatus;
     }
     records("DnsQueryEx-async", status, result.pQueryRecords); CloseHandle(event);
+    if (argc > 2 && !wcscmp(argv[2], L"local")) {
+        query.pQueryCompletionCallback = nullptr; query.pQueryContext = nullptr;
+        query.QueryOptions = DNS_QUERY_CACHE_ONLY;
+        result = {}; result.Version = DNS_QUERY_RESULTS_VERSION1;
+        status = DnsQueryEx(&query, &result, nullptr);
+        records("DnsQueryEx-cache", status, result.pQueryRecords);
+        query.QueryType = DNS_TYPE_AAAA; query.QueryOptions = DNS_QUERY_DUAL_ADDR;
+        result = {}; result.Version = DNS_QUERY_RESULTS_VERSION1;
+        status = DnsQueryEx(&query, &result, nullptr);
+        records("DnsQueryEx-dual", status, result.pQueryRecords);
+        WSACleanup(); return 0;
+    }
     RawResult rawState = {CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     DNS_QUERY_RAW_REQUEST rawQuery = {}; rawQuery.version = 1; rawQuery.resultsVersion = 1;
     rawQuery.dnsQueryName = argv[1]; rawQuery.dnsQueryType = DNS_TYPE_A; rawQuery.protocol = DNS_PROTOCOL_UDP;

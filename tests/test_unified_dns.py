@@ -18,6 +18,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 seen = []
 refuse = False
 full_network = '--network' in sys.argv
+inside_address = os.environ.get('REGION_TEST_DNS_ADDRESS', '127.0.0.153')
 domain = 'region-' + uuid.uuid4().hex + '.invalid'
 
 
@@ -33,10 +34,10 @@ class Resolver:
         kind, _ = struct.unpack('!HH', packet[offset:offset+4])
         seen.append((self.server.server_address[0], name, kind))
         assert name == domain, name
-        answer_ip = '203.0.113.77' if self.server.server_address[0] == '127.0.0.153' else '203.0.113.88'
+        answer_ip = '203.0.113.77' if self.server.server_address[0] == inside_address else '203.0.113.88'
         answer = b'\xc0\x0c' + struct.pack('!HHIH', 1, 1, 30, 4) + socket.inet_aton(answer_ip) if kind == 1 else b''
         if kind == 28: answer = b'\xc0\x0c' + struct.pack('!HHIH', 28, 1, 30, 16) + socket.inet_pton(socket.AF_INET6, '2001:db8::77')
-        refused = refuse and self.server.server_address[0] == '127.0.0.153'
+        refused = refuse and self.server.server_address[0] == inside_address
         if refused: answer = b''
         reply = packet[:2] + struct.pack('!HHHHH', 0x8185 if refused else 0x8180, 1, int(bool(answer)), 0, 0) + packet[12:offset+4] + answer
         return reply
@@ -80,7 +81,7 @@ def outside(label, env=None):
 
 
 with ExitStack() as stack:
-    for address in ['127.0.0.153'] + (['127.0.0.2', '::1'] if full_network else []):
+    for address in [inside_address] + (['127.0.0.2', '::1'] if full_network else []):
         for server_class, handler in [(UDP6 if ':' in address else socketserver.ThreadingUDPServer, DNS), (TCP6 if ':' in address else socketserver.ThreadingTCPServer, TCPDNS)]:
             server = stack.enter_context(server_class((address, 53), handler))
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -91,7 +92,7 @@ with ExitStack() as stack:
 Job=Local\\RegionLauncher.{uuid.uuid4().hex}
 Application={BIN/'DnsProbe.exe'}
 Arguments={domain} child {'raw' if full_network else ''}
-DnsAddress=127.0.0.153
+DnsAddress={inside_address}
 ProxyHost=127.0.0.1
 ProxyPort=17890
 Locale=en-US

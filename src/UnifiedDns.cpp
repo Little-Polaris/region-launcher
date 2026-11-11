@@ -80,10 +80,38 @@ static void WINAPI completed(void* opaque, PDNS_QUERY_RESULT result) {
         state->release();
     }
 }
+static bool isLocalhost(PCWSTR name) {
+    if (!name) return false;
+    size_t length = wcslen(name);
+    if (length && name[length - 1] == L'.') --length;
+    constexpr size_t suffix = 9; // localhost, including its RFC 6761 subdomains.
+    return length >= suffix && (length == suffix || name[length - suffix - 1] == L'.') &&
+        _wcsnicmp(name + length - suffix, L"localhost", suffix) == 0;
+}
+static DNS_STATUS localQuery(PDNS_QUERY_REQUEST request, PDNS_QUERY_RESULT result) {
+    result->pQueryRecords = nullptr;
+    result->QueryOptions = request->QueryOptions;
+    result->QueryStatus = DNS_INFO_NO_RECORDS;
+    if (request->QueryType == DNS_TYPE_A || request->QueryType == DNS_TYPE_ANY ||
+        (request->QueryType == DNS_TYPE_AAAA && (request->QueryOptions & DNS_QUERY_DUAL_ADDR))) {
+        DNS_RECORDW record = {};
+        record.pName = const_cast<PWSTR>(request->QueryName);
+        record.wType = DNS_TYPE_A; record.wDataLength = sizeof(DNS_A_DATA);
+        record.Flags.S.Section = DnsSectionAnswer;
+        record.Flags.S.CharSet = DnsCharSetUnicode;
+        record.Data.A.IpAddress = htonl(INADDR_LOOPBACK);
+        result->pQueryRecords = DnsRecordSetCopyEx(reinterpret_cast<PDNS_RECORD>(&record), DnsCharSetUnicode, DnsCharSetUnicode);
+        result->QueryStatus = result->pQueryRecords ? ERROR_SUCCESS : ERROR_NOT_ENOUGH_MEMORY;
+    }
+    // Immediate DNS_QUERY completion does not invoke the asynchronous callback.
+    // Resolve locally even with CACHE_ONLY/WIRE_ONLY; never consult host DNS or hosts.
+    return result->QueryStatus;
+}
 static DNS_STATUS WINAPI queryEx(PDNS_QUERY_REQUEST request, PDNS_QUERY_RESULT result, PDNS_QUERY_CANCEL cancel) {
     if (!request || !result) return ERROR_INVALID_PARAMETER;
     if (dnsAddresses.AddrCount != 1) return ERROR_BAD_CONFIGURATION;
     if (request->Version != 1 && request->Version != 3) return ERROR_NOT_SUPPORTED;
+    if (isLocalhost(request->QueryName)) return localQuery(request, result);
     // The private resolver owns its cache. Never read or populate the host cache.
     bool dual = (request->QueryOptions & DNS_QUERY_DUAL_ADDR) != 0;
     if ((request->QueryType == DNS_TYPE_AAAA && !dual) || (request->QueryOptions & DNS_QUERY_CACHE_ONLY)) {
