@@ -8,6 +8,24 @@ static class SearchComboTests
     [DllImport("user32.dll")] static extern nint SendMessage(nint handle, int message, nint wParam, nint lParam);
     static object Invoke(ComboBox box, string method, params object[] args) => box.GetType().GetMethod(method, Hidden | BindingFlags.Public)!.Invoke(box, args)!;
     static void Check(bool ok, string what) { if (!ok) throw new Exception(what); }
+    static void CheckPointer(ComboBox box) {
+        var previous = Cursor.Current;
+        try {
+            foreach (string part in new[] { "edit", "list" }) {
+                var window = (NativeWindow)box.GetType().GetField(part, Hidden)!.GetValue(box)!;
+                Cursor.Current = null;
+                SendMessage(window.Handle, 0x0020, window.Handle, (nint)((0x0200 << 16) | 1));
+                nint expected = (part == "edit" ? Cursors.IBeam : Cursors.Arrow).Handle;
+                Check(Cursor.Current?.Handle == expected, $"{box.Name} {part}: pointer not restored after filtering");
+                Cursor.Current = null;
+                SendMessage(window.Handle, 0x0200, 0, (nint)((1 << 16) | 1));
+                Check(Cursor.Current?.Handle == expected, $"{box.Name} {part}: pointer not restored by captured mouse move");
+                Cursor.Current = Cursors.Cross;
+                SendMessage(window.Handle, 0x0200, 0, (nint)(-1));
+                Check(Cursor.Current?.Handle == Cursors.Cross.Handle, "Captured movement outside selector must not override another cursor");
+            }
+        } finally { Cursor.Current = previous; }
+    }
     public static void Run(ComboBox country, ComboBox language, ComboBox zone, string settingsFile) {
         Application.DoEvents();
         var original = File.ReadAllBytes(settingsFile);
@@ -19,6 +37,7 @@ static class SearchComboTests
             box.Text = query; box.SelectionStart = query.Length; Invoke(box, "OnTextUpdate", EventArgs.Empty);
             Check(box.Items.Count > 0 && box.Items.Count < count, "Live filter did not reduce results: " + query);
             Check(box.DroppedDown, "Typing should open matching suggestions");
+            CheckPointer(box);
             Check(box.Text == query && box.SelectionStart == query.Length, "Filtering changed input or caret");
             Check(Equals(box.GetType().GetProperty("Value")!.GetValue(box), selected), "Search changed committed setting");
             Check(File.ReadAllBytes(settingsFile).SequenceEqual(original), "Typing saved an incomplete setting");
@@ -58,6 +77,6 @@ static class SearchComboTests
         Check((int)SendMessage(window.Handle, 0x018e, 0, 0) == 3, "One notch must advance three rows");
         Check(Equals(language.SelectedItem, value) && File.ReadAllBytes(settingsFile).SequenceEqual(original), "Wheel changed saved selection");
         language.DroppedDown = false; Application.DoEvents(); Invoke(language, "ResetFilter");
-        Console.WriteLine("PASS: inline country/language/timezone search, caret, empty/no-match recovery, settings preservation, native wheel one-row steps and high-resolution deltas");
+        Console.WriteLine("PASS: inline search, caret, empty/no-match recovery, settings preservation, native wheel steps; edit/list pointer restoration on cursor and captured-move messages, outside cursor preserved");
     }
 }

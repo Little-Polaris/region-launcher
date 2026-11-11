@@ -110,11 +110,23 @@ sealed class SearchComboBox : ComboBox
         public void Attach(nint handle) { if (Handle == handle) return; ReleaseHandle(); if (handle != 0) AssignHandle(handle); }
         protected override void WndProc(ref Message m) {
             if (m.Msg == 0x020a) { owner.Wheel((short)((long)m.WParam >> 16)); m.Result = 0; return; }
+            if (m.Msg == 0x0020 && m.WParam == Handle && ((long)m.LParam & 0xffff) == 1) {
+                Cursor.Current = input ? Cursors.IBeam : Cursors.Arrow;
+                m.Result = 1; return;
+            }
             if (input && m.Msg == 0x010d) owner.composing = true;
             base.WndProc(ref m);
+            // Captured mouse moves may arrive without WM_SETCURSOR after typing hides the pointer.
+            if (m.Msg == 0x0200 && GetClientRect(Handle, out var bounds)) {
+                int x = (short)(long)m.LParam, y = (short)((long)m.LParam >> 16);
+                if (x >= bounds.Left && x < bounds.Right && y >= bounds.Top && y < bounds.Bottom)
+                    Cursor.Current = input ? Cursors.IBeam : Cursors.Arrow;
+            }
             if (input && m.Msg == 0x010e) { owner.composing = false; if (owner.IsHandleCreated) owner.BeginInvoke(() => { if (owner.Focused) owner.Filter(); }); }
         }
     }
+    [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool GetClientRect(nint handle, out NativeRect rect);
     [StructLayout(LayoutKind.Sequential)] struct ComboInfo { public int size; public Rectangle item, button; public int state; public nint combo, edit, list; }
     [DllImport("user32.dll")] static extern bool GetComboBoxInfo(nint handle, ref ComboInfo info);
     [DllImport("user32.dll")] static extern nint SendMessage(nint handle, int message, nint wParam, nint lParam);
