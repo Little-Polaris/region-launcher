@@ -119,17 +119,16 @@ var ui = new Thread(() =>
         }
         software.SelectedIndex = 0;
         var start = (System.Windows.Forms.Button)form.GetType().GetField("start", flags)!.GetValue(form)!;
-        var stop = (System.Windows.Forms.Button)form.GetType().GetField("stop", flags)!.GetValue(form)!;
         if (start.Parent!.Controls.Cast<System.Windows.Forms.Control>().Count(c => c.Text.Contains("所选程序")) != 1)
             throw new Exception("Expected one program launch button");
         var update = form.GetType().GetMethod("UpdateActions", flags)!;
         var session = form.GetType().GetField("session", flags)!;
         var preparing = form.GetType().GetField("preparing", flags)!;
         update.Invoke(form, null);
-        if (!start.Enabled || stop.Enabled) throw new Exception("Idle launch state incorrect");
+        if (!start.Enabled) throw new Exception("Idle launch state incorrect");
         using var dummySession = new System.Diagnostics.Process();
         session.SetValue(form, dummySession); update.Invoke(form, null);
-        if (!start.Enabled || !stop.Enabled || !country.Enabled || !language.Enabled || !zone.Enabled || !dst.Enabled) throw new Exception("Existing environment must accept another program and its region settings");
+        if (!start.Enabled || !country.Enabled || !language.Enabled || !zone.Enabled || !dst.Enabled) throw new Exception("Existing environment must accept another program and its region settings");
         preparing.SetValue(form, true); update.Invoke(form, null);
         if (start.Enabled || country.Enabled || zone.Enabled) throw new Exception("Preparing must prevent changed launch settings");
         session.SetValue(form, null); preparing.SetValue(form, false); update.Invoke(form, null);

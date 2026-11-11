@@ -57,7 +57,6 @@ sealed class Launcher : Form
     readonly CheckBox dst = new() { Text = "自动切换夏令时与标准时间", Checked = true, AutoSize = true };
     readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     readonly Button start = new() { Text = "启动所选程序", AutoSize = true };
-    readonly Button stop = new() { Text = "结束本次运行", Enabled = false, AutoSize = true };
     readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
     readonly Button checkProxy = new() { Text = "检测联网", AutoSize = true };
     readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
@@ -129,7 +128,7 @@ sealed class Launcher : Form
         UpdateTimeNote();
         var access = new Label { Text = "关闭窗口后在托盘运行；从托盘退出会结束全部运行，请先保存文件。", AutoSize = true, Padding = new(0, 4, 0, 8) };
         grid.Controls.Add(access, 0, 11); grid.SetColumnSpan(access, 3);
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start); buttons.Controls.Add(stop);
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start);
         var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => {
             if (preparing || applicationList == null) return;
             var entry = applicationList.Applications.FirstOrDefault(a => a.Application == "RegionProbe.exe" && a.Arguments == "")
@@ -150,7 +149,7 @@ sealed class Launcher : Form
         };
         grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
         ApplySettings(new LaunchEnvironment());
-        start.Click += async (_, _) => await TrackOperation(StartSession); stop.Click += (_, _) => StopSession();
+        start.Click += async (_, _) => await TrackOperation(StartSession);
         trayMenu.Items.Add("打开启动器", null, (_, _) => RestoreWindow());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("退出（结束全部运行）", null, async (_, _) => await ExitAsync());
@@ -216,7 +215,6 @@ sealed class Launcher : Form
         start.Enabled = !preparing && software.SelectedItem is LaunchApplication && applicationList != null;
         software.Enabled = addSoftware.Enabled = !preparing && applicationList != null;
         editSoftware.Enabled = removeSoftware.Enabled = start.Enabled;
-        stop.Enabled = session != null;
         configureProxy.Enabled = session == null && !preparing;
         linkBrowser.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;
@@ -381,7 +379,7 @@ sealed class Launcher : Form
                 using (candidate) { await candidate.WaitForExitAsync(); await logs; Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
-            session = candidate; stop.Enabled = true;
+            session = candidate;
             preparing = false; UpdateActions();
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
             await session.WaitForExitAsync(); await logs; diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
