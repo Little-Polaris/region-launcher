@@ -6,10 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>RegionLauncher</AssemblyName>
-    <Version>0.3.0-alpha.17</Version>
+    <Version>0.3.0-alpha.18</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>assets/RegionLauncher.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="assets/RegionLauncher.ico" LogicalName="RegionLauncher.AppIcon.ico" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 </Project>

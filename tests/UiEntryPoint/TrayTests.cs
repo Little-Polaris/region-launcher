@@ -14,6 +14,7 @@ static class TrayTests {
     public static void Run(Form form, string bin, string data) {
         var type = form.GetType();
         var tray = (NotifyIcon)type.GetField("tray", Hidden)!.GetValue(form)!;
+        Check(tray.Icon != null && tray.Icon.Handle != System.Drawing.SystemIcons.Application.Handle && form.Icon != null, "Custom tray/window icon missing");
         Check(tray.Visible && tray.ContextMenuStrip!.Items.Count == 3, "Tray menu missing");
         var job = @"Local\RegionLauncher." + Guid.NewGuid().ToString("N");
         var config = Path.Combine(data, "tray-session.ini"); var report = Path.Combine(data, "tray-processes.txt");

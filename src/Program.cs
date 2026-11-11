@@ -64,7 +64,9 @@ sealed class Launcher : Form
     bool exiting, allowClose;
     readonly CancellationTokenSource shutdown = new();
     readonly HashSet<Task> operations = [];
-    readonly NotifyIcon tray = new() { Text = "Region Launcher", Icon = SystemIcons.Application };
+    readonly Icon windowIcon = AppIcon.Load(new Size(32, 32));
+    readonly Icon trayIcon = AppIcon.Load(SystemInformation.SmallIconSize);
+    readonly NotifyIcon tray = new() { Text = "Region Launcher" };
     readonly ContextMenuStrip trayMenu = new();
     readonly string data;
     readonly ApplicationLibrary library;
@@ -78,6 +80,7 @@ sealed class Launcher : Form
     public Launcher() : this(Path.Combine(AppContext.BaseDirectory, "data")) { }
     internal Launcher(string dataDirectory)
     {
+        Icon = windowIcon; tray.Icon = trayIcon;
         data = dataDirectory; library = new(Path.Combine(data, "applications.json"));
         string? logError = null;
         try { diagnostics = new(Path.Combine(data, "logs")); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logError = ex.Message; }
@@ -189,7 +192,7 @@ sealed class Launcher : Form
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
+        if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); windowIcon.Dispose(); trayIcon.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
         base.Dispose(disposing);
     }
     void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }

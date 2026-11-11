@@ -4,7 +4,8 @@ sealed class SearchComboBox : ComboBox
 {
     object[] options = [];
     object? value;
-    bool updating, composing;
+    bool updating, composing, clearingSelection;
+    int filterRevision;
     int wheelRemainder, targetTop;
     readonly System.Windows.Forms.Timer scroll = new() { Interval = 16 };
     readonly ChildWindow list;
@@ -21,6 +22,7 @@ sealed class SearchComboBox : ComboBox
         options = items.ToArray(); ResetFilter();
     }
     public void ResetFilter() {
+        ++filterRevision;
         scroll.Stop(); wheelRemainder = 0;
         updating = true;
         try {
@@ -32,16 +34,29 @@ sealed class SearchComboBox : ComboBox
         if (updating || SelectedItem == null) return;
         value = SelectedItem; base.OnSelectedIndexChanged(e);
         ClearAutomaticSelection();
-        if (IsHandleCreated) BeginInvoke(() => { if (!IsDisposed && !Focused) ClearAutomaticSelection(); });
+        if (IsHandleCreated) {
+            int revision = filterRevision;
+            BeginInvoke(() => { if (!IsDisposed && revision == filterRevision) ClearAutomaticSelection(); });
+        }
     }
-    void ClearAutomaticSelection() { SelectionStart = Text.Length; SelectionLength = 0; }
+    void ClearAutomaticSelection() {
+        if (clearingSelection) return;
+        clearingSelection = true;
+        try { SelectionStart = Text.Length; SelectionLength = 0; }
+        finally { clearingSelection = false; }
+    }
     protected override void OnEnter(EventArgs e) {
         base.OnEnter(e);
         BeginInvoke(() => { if (!IsDisposed && SelectedItem != null && !composing) ClearAutomaticSelection(); });
     }
     protected override void OnTextUpdate(EventArgs e) {
         base.OnTextUpdate(e);
-        if (!updating && !composing) Filter();
+        if (!updating && !composing) QueueFilter();
+    }
+    void QueueFilter() {
+        int revision = ++filterRevision;
+        // CBN_EDITUPDATE occurs before the native edit has finished changing its text.
+        BeginInvoke(() => { if (!IsDisposed && Focused && !composing && revision == filterRevision) Filter(); });
     }
     static string SearchText(object item) => item is TimeZoneInfo zone ? zone.DisplayName + " " + zone.Id : item.ToString() ?? "";
     void Filter() {
@@ -54,6 +69,8 @@ sealed class SearchComboBox : ComboBox
             BeginUpdate(); Items.Clear(); Items.AddRange(matches); SelectedIndex = -1;
             Text = query; EndUpdate();
             if (Focused && matches.Length > 0) DroppedDown = true;
+            // Opening a native dropdown can replace a matching prefix with a whole item.
+            SelectedIndex = -1; Text = query;
             SelectionStart = Math.Min(caret, Text.Length); SelectionLength = Math.Min(length, Text.Length - SelectionStart);
         } finally { updating = false; }
     }
@@ -63,7 +80,16 @@ sealed class SearchComboBox : ComboBox
     }
     protected override void OnDropDownClosed(EventArgs e) {
         scroll.Stop(); base.OnDropDownClosed(e);
-        if (!updating && IsHandleCreated) BeginInvoke(() => { if (!IsDisposed && !DroppedDown) ResetFilter(); });
+        if (!updating && IsHandleCreated) QueueResetFilter();
+    }
+    void QueueResetFilter() {
+        int revision = filterRevision;
+        BeginInvoke(() => { if (!IsDisposed && !DroppedDown && revision == filterRevision) ResetFilter(); });
+    }
+    protected override void OnSelectionChangeCommitted(EventArgs e) {
+        ++filterRevision;
+        base.OnSelectionChangeCommitted(e);
+        QueueResetFilter();
     }
     protected override void OnLeave(EventArgs e) { ResetFilter(); base.OnLeave(e); }
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
@@ -116,13 +142,17 @@ sealed class SearchComboBox : ComboBox
             }
             if (input && m.Msg == 0x010d) owner.composing = true;
             base.WndProc(ref m);
+            if (input && m.Msg == 0x0008) owner.ClearAutomaticSelection(); // WM_KILLFOCUS
+            // WinForms UpdateText can select the edit directly, after selection events finish.
+            if (input && m.Msg == 0x00b1 && !owner.Focused && !owner.updating && !owner.clearingSelection)
+                owner.ClearAutomaticSelection(); // EM_SETSEL
             // Captured mouse moves may arrive without WM_SETCURSOR after typing hides the pointer.
             if (m.Msg == 0x0200 && GetClientRect(Handle, out var bounds)) {
                 int x = (short)(long)m.LParam, y = (short)((long)m.LParam >> 16);
                 if (x >= bounds.Left && x < bounds.Right && y >= bounds.Top && y < bounds.Bottom)
                     Cursor.Current = input ? Cursors.IBeam : Cursors.Arrow;
             }
-            if (input && m.Msg == 0x010e) { owner.composing = false; if (owner.IsHandleCreated) owner.BeginInvoke(() => { if (owner.Focused) owner.Filter(); }); }
+            if (input && m.Msg == 0x010e) { owner.composing = false; if (owner.IsHandleCreated) owner.QueueFilter(); }
         }
     }
     [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left, Top, Right, Bottom; }

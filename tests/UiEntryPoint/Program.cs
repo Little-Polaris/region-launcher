@@ -40,6 +40,7 @@ var ui = new Thread(() =>
 {
     try
     {
+        System.Windows.Forms.Application.EnableVisualStyles();
         using var form = (System.Windows.Forms.Form)OpenLauncher();
         form.GetType().GetMethod("ApplySettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new[] { Activator.CreateInstance(assembly.GetType("LaunchEnvironment")!, true) });
         form.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
