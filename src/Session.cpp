@@ -10,6 +10,7 @@
 #include "NetworkProtocol.h"
 #include "UnicodeInjection.h"
 #include "ConnectBroker.h"
+#include "JobProcess.h"
 
 static HANDLE sessionJob;
 static std::wstring cfg;
@@ -206,19 +207,20 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
             DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &stdCopies[i], 0, TRUE, DUPLICATE_SAME_ACCESS);
     }
     si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = stdCopies[0]; si.hStdOutput = stdCopies[1]; si.hStdError = stdCopies[2];
-    BOOL created = CreateProcessW(app.c_str(), command.data(), nullptr, nullptr, TRUE,
-        CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, cwd.c_str(), &si, &pi);
+    BOOL created = CreateSuspendedJobProcess(sessionJob, app.c_str(), command.data(), cwd.c_str(), si, &pi);
     DWORD createError = GetLastError();
     for (HANDLE handle : stdCopies) if (handle) CloseHandle(handle);
     SetLastError(createError);
-    if (!created) { requestStop(); return error(L"Could not prepare application with locale module"); }
+    if (!created) { requestStop(); return error(L"Could not create application inside process group; it was not started"); }
     auto abortApplication = [&](const WCHAR* reason) {
         DWORD failure = GetLastError(); TerminateProcess(pi.hProcess, failure); WaitForSingleObject(pi.hProcess, 5000);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess); requestStop(); SetLastError(failure);
         return error(reason);
     };
-    if (!AssignProcessToJobObject(sessionJob, pi.hProcess)) {
-        return abortApplication(L"Could not enroll application; it was not resumed");
+    BOOL enrolled = FALSE;
+    if (!IsProcessInJob(pi.hProcess, sessionJob, &enrolled) || !enrolled) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return abortApplication(L"Application is outside the process group; it was not resumed");
     }
     if (inject && !InjectUnicodeDll(pi.hProcess, directory() + L"\\RegionHook.dll")) {
         return abortApplication(L"Could not load the Unicode runtime module; application main thread was not resumed");

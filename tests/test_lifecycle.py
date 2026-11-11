@@ -42,6 +42,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cycles', type=int, default=12)
     parser.add_argument('--online', action='store_true')
+    parser.add_argument('--direct-https', action='store_true', help='Use outside HTTPS directly when no host proxy is running')
     parser.add_argument('--https-host', default='www.baidu.com', help='HTTPS witness hostname (certificate validation stays enabled)')
     parser.add_argument('--https-path', default='/')
     parser.add_argument('--selftest', action='store_true')
@@ -136,22 +137,25 @@ def main():
                 ('persistent-udp', persistent_udp, .005), ('new-udp', new_udp, .02)]
     https = None
     if args.online:
-        # Only this probe explicitly uses the existing proxy; no user setting changes.
-        https = http.client.HTTPSConnection('127.0.0.1', 7890, timeout=12,
+        # Choose a route for this witness only; no user setting changes.
+        https = http.client.HTTPSConnection(args.https_host if args.direct_https else '127.0.0.1',
+                                            443 if args.direct_https else 7890, timeout=12,
                                             context=ssl.create_default_context())
-        https.set_tunnel(args.https_host, 443)
+        if not args.direct_https: https.set_tunnel(args.https_host, 443)
         def persistent_https():
             https.request('GET', args.https_path, headers={'Connection': 'keep-alive'})
             response = https.getresponse()
             body = response.read()
             assert response.status == 200 and body, response.status
         def new_https():
-            p = subprocess.run(['curl.exe', '-sSf', '--proxy', 'http://127.0.0.1:7890',
+            route = ['--noproxy', '*'] if args.direct_https else ['--proxy', 'http://127.0.0.1:7890']
+            p = subprocess.run(['curl.exe', '-sSf', *route,
                                 '--max-time', '12', 'https://'+args.https_host+args.https_path],
                                capture_output=True, timeout=15)
             assert p.returncode == 0 and p.stdout, p.stderr.decode(errors='replace')
-        monitors += [('proxy-https-keepalive', persistent_https, .25),
-                     ('proxy-https-new', new_https, .25)]
+        route_name = 'direct' if args.direct_https else 'proxy'
+        monitors += [(route_name+'-https-keepalive', persistent_https, .25),
+                     (route_name+'-https-new', new_https, .25)]
     threads = []
     for label, operation, interval in monitors:
         thread = threading.Thread(target=monitor, args=(label, operation, interval), daemon=True)

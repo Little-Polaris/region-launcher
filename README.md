@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.22
+# Region Launcher 0.3.0-alpha.23
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.23 修复已有运行环境中启动 Claude MSIX 版时出现 Windows error 5 的问题。创建进程时就加入本次运行组，再检查归属、加载地区与连接模块、恢复主线程；加入失败时不运行目标程序。本机 Claude 5.1231.2 已打开欢迎页面并验证实际 TCP、UDP 和 DNS 请求经过启动器代理；未登录账户，登录后的功能未验收。无需更新后台服务。详见 [Claude 启动验证](docs/claude-startup.md)。
 
 0.3.0-alpha.22 扩展地区设置的注册表读取覆盖：环境内通过常用 Win32 查询、枚举以及 ntdll 查询/枚举读取当前地区、默认语言、日期数字格式和时区时，返回该软件的启动配置。覆盖仅发生在注入进程内，不写系统注册表；父子进程及并行的不同地区环境已验证，外部读取在启动前、运行期间、退出后保持一致。无需更新后台服务。具体覆盖项和限制见 [注册表地区覆盖](docs/registry-region.md)。
 
@@ -40,7 +42,7 @@ Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 D
 
 0.3.0-alpha.2 修复了退出时提前关闭网络句柄、可能丢失环境外数据包的问题。本机后台已更新，12 轮启停期间 6466 次外部通信均成功，宿主网络设置和外部代理进程保持一致，五组通用网络回归通过。见 [启停修复验收](docs/validation-lifecycle-20261109.md) 和 [使用方法](docs/quick-start.md)。
 
-当前重点是验证通用网络机制。完整桌面应用、单实例复用及 Claude Desktop 尚未验收；原型测试不是账号安全或所有程序均兼容的证明。
+当前重点是验证通用网络机制。Claude Desktop 已完成启动和启动阶段网络验证，完整桌面应用功能及全部单实例复用路径仍未验收；原型测试不是账号安全或所有程序均兼容的证明。
 
 ## 统一运行路径
 
@@ -84,6 +86,7 @@ python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py
 python -X utf8 tests/test_app_environments.py
 ./build/ChildEnvironmentTest.exe
+./build/JobProcessTest.exe
 python -X utf8 tests/test_child_environment.py
 python -X utf8 tests/test_unicode_paths.py --network
 python -X utf8 tests/test_private_proxy.py

@@ -93,7 +93,7 @@ sealed class Launcher : Form
         grid.RowStyles.Add(new(SizeType.Percent, 100));
         var title = new Label { Text = "独立运行环境", AutoSize = true, Font = new(Font, FontStyle.Bold), Padding = new(0, 0, 0, 12) };
         grid.Controls.Add(title, 0, 0); grid.SetColumnSpan(title, 3);
-        var notice = new Label { Text = "网络验证原型：Claude Desktop 尚未验证；单实例程序可能把请求交给外部已有进程。完整桌面应用隔离仍在验证中。", AutoSize = true, MaximumSize = new(730, 0), ForeColor = Color.DarkRed, Padding = new(0, 0, 0, 12) };
+        var notice = new Label { Text = "网络验证原型：Claude 已验证启动及启动阶段联网；登录后功能仍待验证。单实例程序可能把请求交给外部已有进程。", AutoSize = true, MaximumSize = new(730, 0), ForeColor = Color.DarkRed, Padding = new(0, 0, 0, 12) };
         grid.Controls.Add(notice, 0, 1); grid.SetColumnSpan(notice, 3);
         AddLabel(grid, "运行软件", 2);
         var apps = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, RowCount = 1, Margin = Padding.Empty };
