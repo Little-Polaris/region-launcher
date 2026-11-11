@@ -158,6 +158,7 @@ sealed class Launcher : Form
         trayMenu.Items.Add("退出（结束全部运行）", null, async (_, _) => await ExitAsync());
         tray.ContextMenuStrip = trayMenu;
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) RestoreWindow(); };
+        tray.BalloonTipClicked += (_, _) => RestoreWindow();
         Shown += (_, _) => tray.Visible = true;
         FormClosing += (_, e) =>
         {
@@ -344,6 +345,7 @@ sealed class Launcher : Form
     {
         if (preparing || exiting) return;
         bool join = session != null;
+        string applicationName = (software.SelectedItem as LaunchApplication)?.Name ?? "所选程序";
         preparing = true; UpdateActions();
         try
         {
@@ -375,20 +377,46 @@ sealed class Launcher : Form
             psi.ArgumentList.Add(join ? "--join" : "--run"); psi.ArgumentList.Add(config);
             var candidate = new Process { StartInfo = psi };
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
-            Task logs = Task.WhenAll(ProcessLog.ReadAsync(candidate.StandardOutput.BaseStream, Append), ProcessLog.ReadAsync(candidate.StandardError.BaseStream, Append));
             if (join)
             {
                 preparing = false; UpdateActions();
-                using (candidate) { await candidate.WaitForExitAsync(); await logs; Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
+                using (candidate) { await MonitorLaunch(candidate); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
             session = candidate;
             preparing = false; UpdateActions();
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
-            await session.WaitForExitAsync(); await logs; diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
+            await MonitorLaunch(session); diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
-        catch (Exception ex) { Append("未启动或运行失败：" + ex.Message); if (session is { HasExited: true }) { session.Dispose(); session = null; } }
+        catch (Exception ex) {
+            Append("未启动或运行失败：" + ex.Message);
+            if (session is { HasExited: true }) { session.Dispose(); session = null; }
+            NotifyLaunchFailure(applicationName);
+        }
         finally { preparing = false; UpdateActions(); }
+    }
+    async Task MonitorLaunch(Process process) {
+        bool started = false;
+        Task logs = Task.WhenAll(
+            ProcessLog.ReadAsync(process.StandardOutput.BaseStream, line => {
+                if (line.StartsWith("STARTED PID=", StringComparison.Ordinal) && uint.TryParse(line[12..], out uint pid) && pid > 0) started = true;
+                Append(line);
+            }), ProcessLog.ReadAsync(process.StandardError.BaseStream, Append));
+        await process.WaitForExitAsync(); await logs;
+        // Session exit codes also include the application's own exit code; only missing startup is a launch failure.
+        if (!started) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见前面的日志。");
+    }
+    void NotifyLaunchFailure(string applicationName) {
+        if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
+        string message = $"“{applicationName}”未能启动。请在启动器中点击“打开日志”查看失败原因。";
+        if (Visible && WindowState != FormWindowState.Minimized)
+            MessageBox.Show(this, message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        else {
+            tray.BalloonTipTitle = "Region Launcher · 启动失败";
+            tray.BalloonTipText = message.Length > 240 ? message[..237] + "…" : message;
+            tray.BalloonTipIcon = ToolTipIcon.Error;
+            tray.ShowBalloonTip(8000);
+        }
     }
     void StopSession()
     {

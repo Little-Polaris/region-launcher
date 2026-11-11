@@ -69,7 +69,7 @@ static class SingleInstanceTests
         }
         void Command(string action) {
             File.WriteAllText(Path.Combine(directory, "command"), action);
-            Wait(() => File.ReadAllText(Path.Combine(directory, "state")) == action, "Window command failed: " + action);
+            Wait(() => File.Exists(Path.Combine(directory, "state")) && File.ReadAllText(Path.Combine(directory, "state")) == action, "Window command failed: " + action);
         }
         try {
             var first = Start(); Duplicate(1);
@@ -79,7 +79,7 @@ static class SingleInstanceTests
             var reopened = Start(); Wait(() => Lines("created") == 2, "Cannot reopen after normal exit");
             reopened.Kill(); reopened.WaitForExit();
             var recovered = Start(); Wait(() => Lines("created") == 3, "Cannot reopen after a crash");
-            Wait(() => File.ReadAllText(Path.Combine(directory, "state")) == "hidden", "Recovered window not ready");
+            Wait(() => File.Exists(Path.Combine(directory, "state")) && File.ReadAllText(Path.Combine(directory, "state")) == "hidden", "Recovered window not ready");
             Command("exit"); Wait(() => recovered.HasExited, "Recovered primary did not exit");
             Console.WriteLine("PASS: single launcher during startup, hidden/minimized activation, duplicate exits, clean restart and crash recovery");
         } finally {

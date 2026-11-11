@@ -1,6 +1,11 @@
 using System.Reflection;
 using System.Text.Json;
 
+if (args.Length == 2 && args[0] == "--launch-result") {
+    if (args[1] == "started") Console.WriteLine("STARTED PID=" + Environment.ProcessId);
+    else Console.Error.WriteLine("Application was not started: fixture rejection");
+    Environment.ExitCode = 17; return;
+}
 if (args.Length == 4 && args[0] == "--single-fixture") { SingleInstanceTests.Fixture(args); return; }
 if (args.Length > 0 && args[0] == "--tray-leaf") { Thread.Sleep(Timeout.Infinite); return; }
 if (args.Length == 2 && args[0] == "--tray-fixture") {
@@ -145,6 +150,7 @@ var ui = new Thread(() =>
         form.GetType().GetMethod("SaveSoftwareList", flags)!.Invoke(form, new[] { empty });
         if (start.Enabled || software.Items.Count != 0 || executable.Text != "" || arguments.Text != "")
             throw new Exception("Deleting all software left a stale launch target");
+        LaunchFailureTests.Run(form);
         TrayTests.Run(form, Path.GetDirectoryName(Path.GetFullPath(args[0]))!, fixture);
         File.WriteAllText(Path.Combine(fixture, "applications.json"), "{malformed");
         using var broken = (System.Windows.Forms.Form)OpenLauncher();
