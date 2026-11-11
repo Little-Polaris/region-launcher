@@ -24,7 +24,7 @@ static class Program
             using var bitmap = new Bitmap(preview.Width, preview.Height);
             preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(args[1]); preview.Close(); return;
         }
-        Application.Run(new Launcher());
+        SingleInstance.Run(() => new Launcher(), form => ((Launcher)form).RestoreWindow());
     }
 }
 
@@ -195,7 +195,7 @@ sealed class Launcher : Form
         if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); windowIcon.Dispose(); trayIcon.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
         base.Dispose(disposing);
     }
-    void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
+    internal void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
     async Task TrackOperation(Func<Task> action) {
         if (exiting) return;
         var task = action(); operations.Add(task);

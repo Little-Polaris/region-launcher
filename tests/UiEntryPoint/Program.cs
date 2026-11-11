@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 
+if (args.Length == 4 && args[0] == "--single-fixture") { SingleInstanceTests.Fixture(args); return; }
 if (args.Length > 0 && args[0] == "--tray-leaf") { Thread.Sleep(Timeout.Infinite); return; }
 if (args.Length == 2 && args[0] == "--tray-fixture") {
     using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
@@ -15,6 +16,7 @@ if (entry.GetCustomAttribute<STAThreadAttribute>() == null)
 Console.WriteLine("PASS: published UI entry point uses STA.");
 
 var assembly = entry.DeclaringType!.Assembly;
+SingleInstanceTests.Run(args[0], Path.Combine(AppContext.BaseDirectory, "test-data", "single-" + Guid.NewGuid().ToString("N")));
 var catalog = assembly.GetType("WindowsSettings") ?? throw new Exception("Missing Windows settings catalog");
 var regions = ((System.Collections.IEnumerable)catalog.GetMethod("Regions")!.Invoke(null, null)!).Cast<object>().ToList();
 var languages = ((System.Collections.IEnumerable)catalog.GetMethod("Languages")!.Invoke(null, null)!).Cast<object>().ToList();
