@@ -15,11 +15,15 @@ sealed class ApplicationEditor : Form
     {
         id = entry?.Id ?? Guid.NewGuid().ToString("N");
         Text = entry == null ? "添加软件" : "编辑软件";
-        Font = new("Microsoft YaHei UI", 10); ClientSize = new(740, 390); MinimumSize = new(680, 430);
+        Font = new("Microsoft YaHei UI", 10); ClientSize = new(740, 440); MinimumSize = new(680, 360);
         StartPosition = FormStartPosition.CenterParent; MinimizeBox = MaximizeBox = false;
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), ColumnCount = 3, RowCount = 9 };
-        grid.ColumnStyles.Add(new(SizeType.Absolute, 100)); grid.ColumnStyles.Add(new(SizeType.Percent, 100)); grid.ColumnStyles.Add(new(SizeType.AutoSize));
-        for (int i = 0; i < 9; ++i) grid.RowStyles.Add(new(SizeType.AutoSize));
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
+        layout.ColumnStyles.Add(new(SizeType.Percent, 100));
+        layout.RowStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.AutoSize));
+        var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Margin = Padding.Empty };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(16, 16, 16, 0), ColumnCount = 3, RowCount = 8 };
+        grid.ColumnStyles.Add(new(SizeType.AutoSize)); grid.ColumnStyles.Add(new(SizeType.Percent, 100)); grid.ColumnStyles.Add(new(SizeType.AutoSize));
+        for (int i = 0; i < 8; ++i) grid.RowStyles.Add(new(SizeType.AutoSize));
         grid.Controls.Add(new Label { Text = "软件名称", AutoSize = true }, 0, 0); grid.Controls.Add(name, 1, 0); grid.SetColumnSpan(name, 2);
         grid.Controls.Add(new Label { Text = "程序路径", AutoSize = true }, 0, 1); grid.Controls.Add(executable, 1, 1);
         var browse = new Button { Text = "浏览…", AutoSize = true };
@@ -45,10 +49,12 @@ sealed class ApplicationEditor : Form
         dst.Checked = settings.AutoDst;
         var hint = new Label { Text = "地区设置对本软件及其子进程生效，修改后需重新启动。\n启动参数可留空；带空格的参数路径请用双引号括起。", AutoSize = true, Padding = new(0, 6, 0, 8) };
         grid.Controls.Add(hint, 0, 7); grid.SetColumnSpan(hint, 3);
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
+        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false, Padding = new(16, 8, 16, 12), Margin = Padding.Empty };
         var cancel = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
-        buttons.Controls.Add(cancel); buttons.Controls.Add(save); grid.Controls.Add(buttons, 0, 8); grid.SetColumnSpan(buttons, 3);
-        Controls.Add(grid); AcceptButton = save; CancelButton = cancel;
+        buttons.Controls.Add(cancel); buttons.Controls.Add(save);
+        content.Controls.Add(grid); layout.Controls.Add(content, 0, 0); layout.Controls.Add(buttons, 0, 1);
+        Controls.Add(layout); AcceptButton = save; CancelButton = cancel;
         name.Text = entry?.Name ?? ""; executable.Text = entry?.Application ?? ""; arguments.Text = entry?.Arguments ?? "";
         save.Click += (_, _) => {
             try {

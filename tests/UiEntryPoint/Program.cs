@@ -64,6 +64,24 @@ var ui = new Thread(() =>
         if (software.Items.Count != 1 || arguments.Text != "--legacy=\"中文 参数\"" || !executable.ReadOnly || !arguments.ReadOnly)
             throw new Exception("Legacy app did not populate selection and details");
         var editorType = assembly.GetType("ApplicationEditor")!;
+        foreach (float fontSize in new[] { 10f, 15f, 20f }) {
+            using var layoutEditor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null, null })!;
+            layoutEditor.Font = new System.Drawing.Font("Microsoft YaHei UI", fontSize);
+            layoutEditor.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
+            layoutEditor.Location = new(-32000, -32000); layoutEditor.ShowInTaskbar = false;
+            layoutEditor.Show();
+            foreach (var size in new[] { new System.Drawing.Size(740, 390), new System.Drawing.Size(680, 360) }) {
+                layoutEditor.Size = size; System.Windows.Forms.Application.DoEvents();
+                foreach (var button in new[] { (System.Windows.Forms.Control)layoutEditor.AcceptButton!, (System.Windows.Forms.Control)layoutEditor.CancelButton! }) {
+                    var bounds = button.RectangleToScreen(button.ClientRectangle);
+                    for (var parent = button.Parent; parent != null; parent = parent.Parent)
+                        if (!parent.RectangleToScreen(parent.ClientRectangle).Contains(bounds))
+                            throw new Exception($"Editor button clipped at font {fontSize}, size {size}");
+                }
+            }
+            Snapshot(layoutEditor, $"editor-layout-{fontSize}.png");
+        }
+        Console.WriteLine("PASS: editor save/cancel remain fully visible at compact sizes and 10/15/20-point fonts");
         using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null, null })!) {
             editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
             editor.Show(); System.Windows.Forms.Application.DoEvents();
