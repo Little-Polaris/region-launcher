@@ -1,6 +1,8 @@
-# Region Launcher 0.3.0-alpha.9
+# Region Launcher 0.3.0-alpha.10
 
 Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 DNS，保留当前用户原有文件访问权限，不创建虚拟机。
+
+0.3.0-alpha.10 支持为软件列表中的每个条目分别保存国家或地区、语言、时区和自动冬夏时间。选择软件即加载对应设置，主界面修改后自动保存；添加、编辑窗口也可配置。同一运行会话可以启动不同地区设置的程序及其子进程，代理节点仍共用。旧列表自动继承原地区配置。本版无需更新后台服务。格式与验证见 [软件列表](docs/applications.md)。
 
 0.3.0-alpha.9 修复 UU 并行运行时接管 Chrome 等程序连接的问题：在进程内保存原始目标，经本次会话的专用连接代理处理 TCP、UDP 和 DNS；补充异步收发、网卡绑定与代理关联恢复支持。没有浏览器专用代理参数，不修改 UU、Clash 或宿主机网络设置。本机已安装的后台无须重新安装。验证范围见 [UU 并行运行](docs/uu-coexistence.md)。
 
@@ -36,7 +38,7 @@ Windows 11 x64 进程环境原型。按本次启动的进程组接管网络和 D
 
 ## 地区与文件
 
-- 国家、语言、时区可分别选择，选项来自 Windows；默认美国、英语（美国）、洛杉矶时区。开始运行前选择，运行中的环境固定使用启动时的设置。
+- 国家、语言、时区按软件条目分别保存，选项来自 Windows；初始默认美国、英语（美国）、洛杉矶时区。修改对该软件下次启动生效，已经运行的程序保持其启动时的设置。
 - 自动冬夏时间：标准时间 UTC−8，夏令时 UTC−7；关闭后全年 UTC−8。
 - 通过公共 Windows 接口和环境变量提供地区、语言和时间；直接读取注册表或使用自带地区库的应用可能有不同表现。
 - 文件保持原有权限和真实路径；结束环境会终止整个进程组，需先保存文件。
@@ -60,6 +62,7 @@ dotnet run --project tests/ApplicationLibrary/ApplicationLibrary.csproj -c Relea
 dotnet run --project tests/UiEntryPoint/UiEntryPoint.csproj -c Release -- (Resolve-Path ./build/service-bin/RegionLauncher.dll).Path
 python -X utf8 tests/test_unified_dns.py --failure
 python -X utf8 tests/test_locale.py
+python -X utf8 tests/test_app_environments.py
 python -X utf8 tests/test_unicode_paths.py --network
 python -X utf8 tests/test_private_proxy.py
 pwsh -NoProfile -File scripts/verify_unified.ps1 -BinDirectory ./build/service-bin

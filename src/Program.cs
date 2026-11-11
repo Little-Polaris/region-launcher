@@ -65,6 +65,7 @@ sealed class Launcher : Form
     readonly ApplicationLibrary library;
     ApplicationList? applicationList;
     bool loadingSoftware;
+    bool loadingSettings;
     readonly DedicatedProxy dedicatedProxy;
     readonly DiagnosticLog? diagnostics;
     Process? session;
@@ -126,7 +127,7 @@ sealed class Launcher : Form
         var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => {
             if (preparing || applicationList == null) return;
             var entry = applicationList.Applications.FirstOrDefault(a => a.Application == "RegionProbe.exe" && a.Arguments == "")
-                ?? new LaunchApplication { Name = "环境测试程序", Application = "RegionProbe.exe" };
+                ?? new LaunchApplication { Name = "环境测试程序", Application = "RegionProbe.exe", Environment = ReadSettings() };
             SaveSoftware(entry);
         };
         buttons.Controls.Add(probe); grid.Controls.Add(buttons, 0, 12); grid.SetColumnSpan(buttons, 3);
@@ -137,7 +138,7 @@ sealed class Launcher : Form
         };
         buttons.Controls.Add(openLogs);
         grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
-        ApplySettings(new Profile());
+        ApplySettings(new LaunchEnvironment());
         start.Click += async (_, _) => await StartSession(); stop.Click += (_, _) => StopSession();
         FormClosing += (_, e) =>
         {
@@ -149,14 +150,18 @@ sealed class Launcher : Form
         };
         dedicatedProxy.UnexpectedExit += () => { StopSession(); Append("独立代理已退出，正在结束本次运行；不会切回 7890。"); };
         Directory.CreateDirectory(data);
-        try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); ApplySettings(p); } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
-        try { applicationList = library.Load(executable.Text, arguments.Text); RefreshSoftware(); }
+        try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); ApplySettings(new LaunchEnvironment { GeoId = p.GeoId, Locale = p.Locale, TimeZone = p.TimeZone, AutoDst = p.AutoDst }); } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
+        try { applicationList = library.Load(executable.Text, arguments.Text, ReadSettings()); RefreshSoftware(); }
         catch (Exception ex) { Append($"软件列表读取失败，原文件已保留：{ex.Message} 请检查 {Path.Combine(data, "applications.json")} 后重启。"); }
+        country.SelectedIndexChanged += (_, _) => SaveSettings();
+        language.SelectedIndexChanged += (_, _) => SaveSettings();
+        timeZone.SelectedIndexChanged += (_, _) => SaveSettings();
+        dst.CheckedChanged += (_, _) => SaveSettings();
         RefreshProxy();
         UpdateTimeNote();
         Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
         if (logError != null) Append("日志文件不可写：" + logError);
-        Append("地区、语言和时区选项来自 Windows；仅对本次环境生效。尚未安装或登录 Claude。");
+        Append("地区、语言、时区按软件自动保存，下次启动生效；已运行的程序不变。代理由本次运行共用。");
     }
     void RefreshProxy()
     {
@@ -181,6 +186,7 @@ sealed class Launcher : Form
         stop.Enabled = session != null;
         configureProxy.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;
+        country.Enabled = language.Enabled = timeZone.Enabled = dst.Enabled = start.Enabled;
     }
     void RefreshSoftware()
     {
@@ -195,6 +201,7 @@ sealed class Launcher : Form
         if (loadingSoftware) return;
         var entry = software.SelectedItem as LaunchApplication;
         executable.Text = entry?.Application ?? ""; arguments.Text = entry?.Arguments ?? "";
+        if (entry != null) ApplySettings(entry.Environment ?? new LaunchEnvironment());
         if (applicationList != null && applicationList.SelectedId != entry?.Id) {
             var updated = applicationList with { SelectedId = entry?.Id };
             try { library.Save(updated); applicationList = updated; }
@@ -205,7 +212,7 @@ sealed class Launcher : Form
     void EditSoftware(bool edit)
     {
         if (preparing || applicationList == null) return;
-        using var dialog = new ApplicationEditor(edit ? software.SelectedItem as LaunchApplication : null);
+        using var dialog = new ApplicationEditor(edit ? software.SelectedItem as LaunchApplication : null, ReadSettings());
         if (dialog.ShowDialog(this) == DialogResult.OK) SaveSoftware(dialog.Entry!);
     }
     void SaveSoftware(LaunchApplication entry)
@@ -228,12 +235,32 @@ sealed class Launcher : Form
         var entries = applicationList.Applications.Where(a => a.Id != entry.Id).ToList();
         SaveSoftwareList(applicationList with { SelectedId = entries.FirstOrDefault()?.Id, Applications = entries });
     }
-    void ApplySettings(Profile profile)
+    LaunchEnvironment ReadSettings() => new() {
+        GeoId = (country.SelectedItem as RegionOption)?.GeoId ?? 244,
+        Locale = (language.SelectedItem as LanguageOption)?.Name ?? "en-US",
+        TimeZone = (timeZone.SelectedItem as TimeZoneInfo)?.Id ?? "Pacific Standard Time", AutoDst = dst.Checked
+    };
+    void SaveSettings()
     {
+        if (loadingSettings || loadingSoftware || preparing || applicationList == null || software.SelectedItem is not LaunchApplication entry) return;
+        var changed = entry with { Environment = ReadSettings() };
+        if (changed == entry) return;
+        var updated = applicationList with { Applications = applicationList.Applications.Select(a => a.Id == entry.Id ? changed : a).ToList() };
+        try {
+            library.Save(updated); applicationList = updated;
+            loadingSoftware = true;
+            int index = software.SelectedIndex; software.Items[index] = changed; software.SelectedIndex = index;
+        } catch (Exception ex) { ApplySettings(entry.Environment ?? new LaunchEnvironment()); Append("地区设置未保存：" + ex.Message); }
+        finally { loadingSoftware = false; UpdateActions(); }
+    }
+    void ApplySettings(LaunchEnvironment profile)
+    {
+        loadingSettings = true;
         country.SelectedItem = country.Items.Cast<RegionOption>().FirstOrDefault(r => r.GeoId == profile.GeoId) ?? country.Items.Cast<RegionOption>().First(r => r.GeoId == 244);
-        language.SelectedItem = language.Items.Cast<LanguageOption>().FirstOrDefault(l => l.Name == profile.Locale) ?? language.Items.Cast<LanguageOption>().First(l => l.Name == "en-US");
+        language.SelectedItem = language.Items.Cast<LanguageOption>().FirstOrDefault(l => l.Name.Equals(profile.Locale, StringComparison.OrdinalIgnoreCase)) ?? language.Items.Cast<LanguageOption>().First(l => l.Name == "en-US");
         timeZone.SelectedItem = timeZone.Items.Cast<TimeZoneInfo>().FirstOrDefault(z => z.Id == profile.TimeZone) ?? timeZone.Items.Cast<TimeZoneInfo>().First(z => z.Id == "Pacific Standard Time");
         dst.Checked = profile.AutoDst; UpdateTimeNote();
+        loadingSettings = false;
     }
     void UpdateTimeNote()
     {
@@ -291,14 +318,15 @@ sealed class Launcher : Form
             if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
             string dnsAddress = dedicatedProxy.DnsAddress;
             start.Enabled = false; await CheckProxy();
-            var region = country.SelectedItem as RegionOption ?? throw new IOException("请选择国家或地区。");
-            var selectedLanguage = language.SelectedItem as LanguageOption ?? throw new IOException("请选择语言。");
-            var selectedZone = timeZone.SelectedItem as TimeZoneInfo ?? throw new IOException("请选择时区。");
-            var profile = new Profile { GeoId = region.GeoId, Locale = selectedLanguage.Name, TimeZone = selectedZone.Id, Application = executable.Text, Arguments = arguments.Text, ProxyHost = proxyHost.Text.Trim(), ProxyPort = (int)proxyPort.Value, AutoDst = dst.Checked };
+            var settings = selected.Environment ?? throw new IOException("所选软件缺少地区设置，请重新编辑并保存。");
+            settings.Validate();
+            var region = country.Items.Cast<RegionOption>().Single(r => r.GeoId == settings.GeoId);
+            var profile = new Profile { GeoId = settings.GeoId, Locale = settings.Locale, TimeZone = settings.TimeZone, Application = selected.Application, Arguments = selected.Arguments, ProxyHost = proxyHost.Text.Trim(), ProxyPort = (int)proxyPort.Value, AutoDst = settings.AutoDst };
+            Append($"软件环境：{selected.Name}；地区={region.Code}，语言={settings.Locale}，时区={settings.TimeZone}，自动冬夏时间={settings.AutoDst}。");
             File.WriteAllText(Path.Combine(data, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
             string id = Guid.NewGuid().ToString("N"); if (!join) currentJob = @"Local\RegionLauncher." + id;
             string folder = Path.Combine(data, "sessions", id); Directory.CreateDirectory(folder); string config = Path.Combine(folder, "session.ini");
-            string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(dst.Checked ? 1 : 0)}\r\n";
+            string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(profile.AutoDst ? 1 : 0)}\r\n";
             File.WriteAllText(config, ini, Encoding.Unicode);
             File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
             var psi = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "RegionSession.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -314,12 +342,11 @@ sealed class Launcher : Form
             }
             session = candidate; stop.Enabled = true;
             preparing = false; UpdateActions();
-            proxyHost.Enabled = proxyPort.Enabled = dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = false;
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
             await session.WaitForExitAsync(); await logs; diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) { Append("未启动或运行失败：" + ex.Message); if (session is { HasExited: true }) { session.Dispose(); session = null; } }
-        finally { preparing = false; UpdateActions(); dst.Enabled = country.Enabled = language.Enabled = timeZone.Enabled = session == null; }
+        finally { preparing = false; UpdateActions(); }
     }
     void StopSession()
     {

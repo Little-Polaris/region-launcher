@@ -34,7 +34,7 @@ var ui = new Thread(() =>
     try
     {
         using var form = (System.Windows.Forms.Form)OpenLauncher();
-        form.GetType().GetMethod("ApplySettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new[] { Activator.CreateInstance(assembly.GetType("Profile")!, true) });
+        form.GetType().GetMethod("ApplySettings", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, new[] { Activator.CreateInstance(assembly.GetType("LaunchEnvironment")!, true) });
         form.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
         form.Location = new System.Drawing.Point(-32000, -32000); form.ShowInTaskbar = false;
         form.Show(); System.Windows.Forms.Application.DoEvents();
@@ -45,12 +45,19 @@ var ui = new Thread(() =>
         if (software.Items.Count != 1 || arguments.Text != "--legacy=\"中文 参数\"" || !executable.ReadOnly || !arguments.ReadOnly)
             throw new Exception("Legacy app did not populate selection and details");
         var editorType = assembly.GetType("ApplicationEditor")!;
-        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null })!) {
+        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null, null })!) {
             editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
             editor.Show(); System.Windows.Forms.Application.DoEvents();
             ((System.Windows.Forms.TextBox)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "第二个软件 🚀";
             ((System.Windows.Forms.TextBox)editorType.GetField("executable", flags)!.GetValue(editor)!).Text = Environment.ProcessPath!;
             ((System.Windows.Forms.TextBox)editorType.GetField("arguments", flags)!.GetValue(editor)!).Text = "--second=\"两个 参数\"";
+            var editCountry = (System.Windows.Forms.ComboBox)editorType.GetField("country", flags)!.GetValue(editor)!;
+            var editLanguage = (System.Windows.Forms.ComboBox)editorType.GetField("language", flags)!.GetValue(editor)!;
+            var editZone = (System.Windows.Forms.ComboBox)editorType.GetField("timeZone", flags)!.GetValue(editor)!;
+            editCountry.SelectedItem = editCountry.Items.Cast<object>().Single(r => (int)r.GetType().GetProperty("GeoId")!.GetValue(r)! == 122);
+            editLanguage.SelectedItem = editLanguage.Items.Cast<object>().Single(l => (string)l.GetType().GetProperty("Name")!.GetValue(l)! == "ja-JP");
+            editZone.SelectedItem = editZone.Items.Cast<TimeZoneInfo>().Single(z => z.Id == "Tokyo Standard Time");
+            ((System.Windows.Forms.CheckBox)editorType.GetField("dst", flags)!.GetValue(editor)!).Checked = false;
             Snapshot(editor, "software-editor.png");
             ((System.Windows.Forms.Button)editorType.GetField("save", flags)!.GetValue(editor)!).PerformClick();
             if (editor.DialogResult != System.Windows.Forms.DialogResult.OK) throw new Exception("Software editor did not save");
@@ -58,7 +65,7 @@ var ui = new Thread(() =>
             form.GetType().GetMethod("SaveSoftware", flags)!.Invoke(form, new[] { item });
         }
         if (software.Items.Count != 2 || arguments.Text != "--second=\"两个 参数\"") throw new Exception("Added software not selected");
-        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new[] { software.SelectedItem! })!) {
+        using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { software.SelectedItem!, null })!) {
             editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
             editor.Show(); System.Windows.Forms.Application.DoEvents();
             ((System.Windows.Forms.TextBox)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "编辑后的软件";
@@ -78,6 +85,27 @@ var ui = new Thread(() =>
         var language = (System.Windows.Forms.ComboBox)form.GetType().GetField("language", flags)!.GetValue(form)!;
         var zone = (System.Windows.Forms.ComboBox)form.GetType().GetField("timeZone", flags)!.GetValue(form)!;
         var dst = (System.Windows.Forms.CheckBox)form.GetType().GetField("dst", flags)!.GetValue(form)!;
+        software.SelectedIndex = 1;
+        if (((TimeZoneInfo)zone.SelectedItem!).Id != "Tokyo Standard Time" || dst.Checked ||
+            (int)country.SelectedItem!.GetType().GetProperty("GeoId")!.GetValue(country.SelectedItem)! != 122 ||
+            (string)language.SelectedItem!.GetType().GetProperty("Name")!.GetValue(language.SelectedItem)! != "ja-JP") throw new Exception("Editor region settings not loaded on selection");
+        country.SelectedItem = country.Items.Cast<object>().Single(r => (int)r.GetType().GetProperty("GeoId")!.GetValue(r)! == 94);
+        language.SelectedItem = language.Items.Cast<object>().Single(l => (string)l.GetType().GetProperty("Name")!.GetValue(l)! == "de-DE");
+        zone.SelectedItem = zone.Items.Cast<TimeZoneInfo>().Single(z => z.Id == "W. Europe Standard Time");
+        dst.Checked = true;
+        software.SelectedIndex = 0;
+        if (((TimeZoneInfo)zone.SelectedItem!).Id != "Pacific Standard Time" || !dst.Checked) throw new Exception("One app changed another app's region");
+        software.SelectedIndex = 1;
+        if (!dst.Checked) throw new Exception("Main form changes were not saved to the app");
+        using (var reopened = (System.Windows.Forms.Form)OpenLauncher()) {
+            var restoredZone = (System.Windows.Forms.ComboBox)reopened.GetType().GetField("timeZone", flags)!.GetValue(reopened)!;
+            var restoredCountry = (System.Windows.Forms.ComboBox)reopened.GetType().GetField("country", flags)!.GetValue(reopened)!;
+            var restoredLanguage = (System.Windows.Forms.ComboBox)reopened.GetType().GetField("language", flags)!.GetValue(reopened)!;
+            if (((TimeZoneInfo)restoredZone.SelectedItem!).Id != "W. Europe Standard Time" ||
+                (int)restoredCountry.SelectedItem!.GetType().GetProperty("GeoId")!.GetValue(restoredCountry.SelectedItem)! != 94 ||
+                (string)restoredLanguage.SelectedItem!.GetType().GetProperty("Name")!.GetValue(restoredLanguage.SelectedItem)! != "de-DE") throw new Exception("App environment lost after reopening");
+        }
+        software.SelectedIndex = 0;
         var start = (System.Windows.Forms.Button)form.GetType().GetField("start", flags)!.GetValue(form)!;
         var stop = (System.Windows.Forms.Button)form.GetType().GetField("stop", flags)!.GetValue(form)!;
         if (start.Parent!.Controls.Cast<System.Windows.Forms.Control>().Count(c => c.Text.Contains("所选程序")) != 1)
@@ -89,9 +117,9 @@ var ui = new Thread(() =>
         if (!start.Enabled || stop.Enabled) throw new Exception("Idle launch state incorrect");
         using var dummySession = new System.Diagnostics.Process();
         session.SetValue(form, dummySession); update.Invoke(form, null);
-        if (!start.Enabled || !stop.Enabled) throw new Exception("Existing environment must accept another program");
+        if (!start.Enabled || !stop.Enabled || !country.Enabled || !language.Enabled || !zone.Enabled || !dst.Enabled) throw new Exception("Existing environment must accept another program and its region settings");
         preparing.SetValue(form, true); update.Invoke(form, null);
-        if (start.Enabled) throw new Exception("Preparing must prevent repeated launches");
+        if (start.Enabled || country.Enabled || zone.Enabled) throw new Exception("Preparing must prevent changed launch settings");
         session.SetValue(form, null); preparing.SetValue(form, false); update.Invoke(form, null);
         // Showing the form must not reset explicitly selected defaults to the
         // first alphabetic item, regardless of a saved user profile.
@@ -121,3 +149,4 @@ Directory.Delete(fixture, true);
 Console.WriteLine("PASS: displayed form retains US/en-US/Pacific and automatic DST.");
 Console.WriteLine("PASS: single launch button is available both idle and running; disabled while preparing.");
 Console.WriteLine("PASS: software migration, add/edit dialogs, dropdown parameter switching, remembered selection, empty and malformed lists.");
+Console.WriteLine("PASS: per-app country/language/timezone/DST editing, automatic saving and reopening; existing session keeps controls available.");

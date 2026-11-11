@@ -7,6 +7,7 @@ sealed record LaunchApplication
     public string Name { get; init; } = "";
     public string Application { get; init; } = "";
     public string Arguments { get; init; } = "";
+    public LaunchEnvironment? Environment { get; init; }
     public override string ToString() => Name;
 }
 
@@ -23,16 +24,22 @@ sealed class ApplicationLibrary(string path)
         WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
-    public ApplicationList Load(string legacyApplication, string legacyArguments)
+    public ApplicationList Load(string legacyApplication, string legacyArguments, LaunchEnvironment? legacyEnvironment = null)
     {
+        legacyEnvironment ??= new();
         if (File.Exists(path)) {
             var value = JsonSerializer.Deserialize<ApplicationList>(File.ReadAllText(path), json)
                 ?? throw new InvalidDataException("软件列表不能为空 JSON。");
-            Validate(value); return value;
+            Validate(value);
+            if (value.Applications.Any(a => a.Environment == null)) {
+                value = value with { Applications = value.Applications.Select(a => a with { Environment = a.Environment ?? legacyEnvironment }).ToList() };
+                Save(value);
+            }
+            return value;
         }
         var initial = new ApplicationList();
         if (!string.IsNullOrWhiteSpace(legacyApplication)) {
-            var entry = new LaunchApplication { Name = System.IO.Path.GetFileNameWithoutExtension(legacyApplication), Application = legacyApplication, Arguments = legacyArguments };
+            var entry = new LaunchApplication { Name = System.IO.Path.GetFileNameWithoutExtension(legacyApplication), Application = legacyApplication, Arguments = legacyArguments, Environment = legacyEnvironment };
             initial = initial with { SelectedId = entry.Id, Applications = [entry] };
         }
         Save(initial); return initial;
@@ -50,6 +57,7 @@ sealed class ApplicationLibrary(string path)
     public static string ResolvePath(string application) => System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(application), AppContext.BaseDirectory);
     public static void ValidateEntry(LaunchApplication entry)
     {
+        entry.Environment?.Validate();
         if (string.IsNullOrWhiteSpace(entry.Id) || string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Application) || entry.Arguments == null)
             throw new InvalidDataException("软件需要名称、程序路径和有效的启动参数字段。");
         foreach (string text in new[] { entry.Id, entry.Name, entry.Application, entry.Arguments })
