@@ -29,6 +29,10 @@ with zipfile.ZipFile(args.archive) as archive:
     ):
         assert required in names, f'Missing runtime dependency: {required}'
     assert archive.testzip() is None, 'Corrupt ZIP member'
+    assert 'CHANGELOG.md' in names and 'LICENSE' in names, 'Missing public release documentation'
+    assert 'docs/launcher.png' not in names, 'Local UI test screenshot included'
+    source_docs = {p.name for p in (Path(__file__).resolve().parents[1] / 'docs').glob('*.md')}
+    assert {n[5:] for n in names if n.startswith('docs/') and not n.endswith('/')} == source_docs | {'build-commit.txt'}, 'Unexpected documentation payload'
     for filename, machine in [('RegionHook.dll', 0x8664), ('RegionHook32.dll', 0x14c),
                               ('RegionInject64.exe', 0x8664), ('RegionInject32.exe', 0x14c),
                               ('RegionProbe32.exe', 0x14c), ('DnsProbe32.exe', 0x14c)]:

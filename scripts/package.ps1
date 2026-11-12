@@ -32,9 +32,9 @@ Copy-Item -LiteralPath "$root/vendor/detours/LICENSE.md" -Destination "$licenses
 Copy-Item -LiteralPath "$root/vendor/proxybridge/LICENSE" -Destination "$licenses/ProxyBridge-MIT.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/windivert/WinDivert-2.2.2-A/LICENSE" -Destination "$licenses/WinDivert-LICENSE.txt" -Force
 Copy-Item -LiteralPath "$root/README.md" -Destination "$output/使用说明.md" -Force
+Copy-Item -LiteralPath "$root/CHANGELOG.md","$root/LICENSE" -Destination $output -Force
 Get-ChildItem -LiteralPath "$root/docs" -Filter '*.md' -File | Copy-Item -Destination $docs -Force
 & (Join-Path $PSScriptRoot 'package_service.ps1') -BinDirectory $bin -OutputDirectory $output
-if (Test-Path -LiteralPath "$root/build/test-results/launcher.png") { Copy-Item -LiteralPath "$root/build/test-results/launcher.png" -Destination "$docs/launcher.png" -Force }
 Push-Location $root
 try {
     $commit = git rev-parse HEAD
@@ -53,11 +53,15 @@ try {
 foreach ($file in $files) { Copy-Item -LiteralPath "$app/$file" -Destination "$stage/app" }
 Copy-Item -LiteralPath $licenses -Destination "$stage/app" -Recurse
 if (Test-Path "$app/proxy") { Copy-Item -LiteralPath "$app/proxy" -Destination "$stage/app" -Recurse }
-Copy-Item -LiteralPath $docs -Destination $stage -Recurse
+# Publish source documentation only; the live output may contain local diagnostics.
+New-Item -ItemType Directory -Path "$stage/docs" -Force | Out-Null
+Get-ChildItem -LiteralPath "$root/docs" -Filter '*.md' -File | Copy-Item -Destination "$stage/docs"
+Copy-Item -LiteralPath "$docs/build-commit.txt" -Destination "$stage/docs"
 Copy-Item -LiteralPath (Join-Path $output 'install') -Destination $stage -Recurse
 Get-ChildItem -LiteralPath $output -Filter '*.cmd' -File | Copy-Item -Destination $stage
 Copy-Item -LiteralPath "$output/使用说明.md","$output/SHA256SUMS.txt" -Destination $stage
-Compress-Archive -LiteralPath "$stage/app","$stage/docs","$stage/install","$stage/安装或更新后台服务.cmd","$stage/卸载后台服务.cmd","$stage/使用说明.md","$stage/SHA256SUMS.txt" -DestinationPath "$packages/RegionLauncher-$version-win-x64.zip" -Force
+Copy-Item -LiteralPath "$root/CHANGELOG.md","$root/LICENSE" -Destination $stage
+Compress-Archive -LiteralPath "$stage/app","$stage/docs","$stage/install","$stage/安装或更新后台服务.cmd","$stage/卸载后台服务.cmd","$stage/使用说明.md","$stage/SHA256SUMS.txt","$stage/CHANGELOG.md","$stage/LICENSE" -DestinationPath "$packages/RegionLauncher-$version-win-x64.zip" -Force
 } finally {
     $resolvedStage = [IO.Path]::GetFullPath($stage)
     $buildRoot = [IO.Path]::GetFullPath((Join-Path $root 'build')) + [IO.Path]::DirectorySeparatorChar
