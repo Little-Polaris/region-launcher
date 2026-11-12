@@ -188,7 +188,7 @@ sealed class Launcher : Form
         proxyHost.Text = "127.0.0.1"; proxyHost.ReadOnly = true; proxyHost.Enabled = proxyPort.Enabled = false;
         try {
             proxyPort.Value = dedicatedProxy.Configured ? dedicatedProxy.Port : 17890;
-            Append(dedicatedProxy.Configured ? "已加载独立代理配置；全部目标使用固定节点和专用 DNS。" : "请点击“独立代理配置”填写或导入节点。");
+            Append(dedicatedProxy.Configured ? "已加载独立代理配置；公网使用固定节点，局域网直连，DNS 使用专用解析器。" : "请点击“独立代理配置”填写或导入节点。");
         }
         catch { Append("独立代理配置无法读取，请点击“独立代理配置”修正。"); }
         UpdateActions();

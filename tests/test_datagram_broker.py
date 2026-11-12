@@ -56,17 +56,12 @@ def main():
         for mode in ('sync', 'connected', 'event', 'result', 'iocp', 'iocpex', 'callback', 'recvmsg', 'sendmsg'):
             run(mode, app, mode)
         run('multi-peer-recovery', sys.executable, subprocess.list2cmdline([str(ROOT/'tests/datagram_socket_client.py')]))
-        with socket.socket(type=socket.SOCK_DGRAM) as direct, socket.socket() as unavailable:
-            direct.bind((socket.gethostbyname(socket.gethostname()), 0)); direct.settimeout(.3)
+        with socket.socket() as unavailable:
             unavailable.bind(('127.0.0.1', 0))
-            # Prove the target is reachable before checking the selected process.
-            with socket.socket(type=socket.SOCK_DGRAM) as baseline:
-                baseline.sendto(b'baseline', direct.getsockname()); assert direct.recvfrom(256)[0] == b'baseline'
             run('fail-closed', sys.executable, subprocess.list2cmdline([str(ROOT/'tests/datagram_socket_client.py'),
-                direct.getsockname()[0], str(direct.getsockname()[1])]), unavailable.getsockname()[1])
-            try: direct.recvfrom(256)
-            except TimeoutError: pass
-            else: raise AssertionError('UDP escaped to the direct target')
+                '203.0.113.42', '443']), unavailable.getsockname()[1])
+            failed = (OUT/'fail-closed.log').read_text(encoding='utf8')
+            assert 'FAILED SOCKS5' in failed and 'DIRECT' not in failed, failed
         assert not errors, errors
         (OUT/'results.json').write_text(json.dumps({'results': results, 'requests': requests}, indent=2))
         print('PASS: nine native UDP paths; peer restoration, mapped IPv4, multiple targets, proxy association recovery and IPv6 block')

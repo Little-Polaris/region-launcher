@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include "ConnectBroker.h"
 #include "NetworkProtocol.h"
+#include "LanRoute.h"
 
 static HANDLE brokerStop, brokerJob;
 static USHORT socksPort;
@@ -49,11 +50,17 @@ static bool ready(SOCKET s, bool write, long ms) {
     fd_set set; FD_ZERO(&set); FD_SET(s, &set); timeval timeout = {ms / 1000, (ms % 1000) * 1000};
     return select(0, write ? nullptr : &set, write ? &set : nullptr, nullptr, &timeout) > 0;
 }
+static bool lanRoute(const ConnectRequest& request) {
+    // DNS must never become a LAN exception, even if no dedicated resolver is configured.
+    return request.port != htons(53) && IsLanIPv4(ntohl(request.address));
+}
 static bool upstream(SOCKET s, const ConnectRequest& request, sockaddr_in* udpRelay = nullptr) {
     sockaddr_in proxy = {}; proxy.sin_family = AF_INET; proxy.sin_addr.s_addr = htonl(INADDR_LOOPBACK); proxy.sin_port = htons(socksPort);
     bool dns = dnsAddress && request.port == htons(53);
+    bool lan = lanRoute(request);
     if (dns) { proxy.sin_addr.s_addr = dnsAddress; proxy.sin_port = htons(53); }
-    if (dns && udpRelay) { *udpRelay = proxy; return true; }
+    if (lan) { proxy.sin_addr.s_addr = request.address; proxy.sin_port = request.port; }
+    if ((dns || lan) && udpRelay) { *udpRelay = proxy; return true; }
     DWORD timeout = 5000;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
@@ -63,7 +70,7 @@ static bool upstream(SOCKET s, const ConnectRequest& request, sockaddr_in* udpRe
     int error = 0, length = sizeof(error);
     if (getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&error, &length) || error) return false;
     nonblock = 0; ioctlsocket(s, FIONBIO, &nonblock);
-    if (dns) return true;
+    if (dns || lan) return true;
     BYTE hello[] = {5, 1, 0}, answer[4] = {};
     if (!exact(s, hello, 3, true) || !exact(s, answer, 2, false) || answer[0] != 5 || answer[1] != 0) return false;
     BYTE command[10] = {5, 1, 0, 1}; memcpy(command + 4, &request.address, 4); memcpy(command + 8, &request.port, 2);
@@ -100,6 +107,11 @@ static void logRoute(const Relay& task, bool udp, bool ok) {
     IN_ADDR ip; ip.s_addr = task.request.address; char target[INET_ADDRSTRLEN] = {}, via[INET_ADDRSTRLEN] = {};
     InetNtopA(AF_INET, &ip, target, sizeof(target));
     bool dns = dnsAddress && task.request.port == htons(53);
+    if (lanRoute(task.request)) {
+        fprintf(stdout, "[ConnectBroker] PID=%lu %s %s:%u %s LAN\n", task.pid, udp ? "UDP" : "TCP",
+            target, ntohs(task.request.port), ok ? "DIRECT" : "FAILED");
+        fflush(stdout); return;
+    }
     ip.s_addr = dns ? dnsAddress : htonl(INADDR_LOOPBACK); InetNtopA(AF_INET, &ip, via, sizeof(via));
     fprintf(stdout, "[ConnectBroker] PID=%lu %s%s:%u %s %s %s:%u\n", task.pid, udp ? "UDP " : "TCP ",
         target, ntohs(task.request.port), ok ? "PROXY" : "FAILED", dns ? "DNS" : "SOCKS5", via, dns ? 53 : socksPort);
@@ -128,7 +140,7 @@ static DWORD WINAPI udpRelay(void* opaque) {
     {
         Socket local(task->base.listener);
         sockaddr_in client = {};
-        bool dns = dnsAddress && task->base.request.port == htons(53);
+        bool plain = (dnsAddress && task->base.request.port == htons(53)) || lanRoute(task->base.request);
         while (process && !stopping() && WaitForSingleObject(task->cancel, 0) != WAIT_OBJECT_0 && WaitForSingleObject(process, 0) != WAIT_OBJECT_0) {
         Socket control(tcp());
         Socket remote(WSASocketW(AF_INET, SOCK_DGRAM, IPPROTO_UDP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT));
@@ -138,9 +150,9 @@ static DWORD WINAPI udpRelay(void* opaque) {
         logRoute(task->base, true, ok);
         std::vector<char> buffer(65536);
         while (ok && !stopping() && WaitForSingleObject(task->cancel, 0) != WAIT_OBJECT_0 && WaitForSingleObject(process, 0) != WAIT_OBJECT_0) {
-            fd_set read; FD_ZERO(&read); FD_SET(local.value, &read); FD_SET(remote.value, &read); if (!dns) FD_SET(control.value, &read);
+            fd_set read; FD_ZERO(&read); FD_SET(local.value, &read); FD_SET(remote.value, &read); if (!plain) FD_SET(control.value, &read);
             timeval delay = {0, 200000}; int count = select(0, &read, nullptr, nullptr, &delay);
-            if (count < 0 || (!dns && FD_ISSET(control.value, &read))) break;
+            if (count < 0 || (!plain && FD_ISSET(control.value, &read))) break;
             if (FD_ISSET(local.value, &read)) {
                 sockaddr_in sender = {}; int length = sizeof(sender);
                 int n = recvfrom(local, buffer.data() + 10, 65497, 0, (sockaddr*)&sender, &length);
@@ -152,12 +164,12 @@ static DWORD WINAPI udpRelay(void* opaque) {
                 if (sender.sin_addr.s_addr != client.sin_addr.s_addr || sender.sin_port != client.sin_port) continue;
                 memset(buffer.data(), 0, 3); buffer[3] = 1;
                 memcpy(buffer.data() + 4, &task->base.request.address, 4); memcpy(buffer.data() + 8, &task->base.request.port, 2);
-                int offset = dns ? 10 : 0, size = dns ? n : n + 10;
+                int offset = plain ? 10 : 0, size = plain ? n : n + 10;
                 if (send(remote, buffer.data() + offset, size, 0) != size) break;
             }
             if (FD_ISSET(remote.value, &read)) {
                 int n = recv(remote, buffer.data(), (int)buffer.size(), 0);
-                if (dns) {
+                if (plain) {
                     if (n >= 0 && client.sin_port) sendto(local, buffer.data(), n, 0, (sockaddr*)&client, sizeof(client));
                     continue;
                 }
@@ -167,7 +179,7 @@ static DWORD WINAPI udpRelay(void* opaque) {
             }
         }
         // Keep the local endpoint stable across an upstream restart. Lost packets
-        // are left to the application's UDP retry; they never go directly outside.
+        // are left to the application's UDP retry; the selected route never changes.
         HANDLE waits[] = {brokerStop, task->cancel, process};
         if (WaitForMultipleObjects(3, waits, FALSE, 1000) != WAIT_TIMEOUT) break;
         }
