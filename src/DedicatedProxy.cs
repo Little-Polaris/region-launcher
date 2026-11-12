@@ -23,6 +23,9 @@ sealed class DedicatedProxy : IDisposable
     public string ConfigPath => config;
     public string EnginePath => Path.Combine(bin, "proxy", "mihomo.exe");
     Process? process;
+    ProxyPorts? ports;
+    volatile bool stopping;
+    public bool CleanupComplete => process == null && ports == null;
     readonly SemaphoreSlim gate = new(1);
     public bool Configured => File.Exists(config);
     public event Action? UnexpectedExit;
@@ -41,7 +44,7 @@ sealed class DedicatedProxy : IDisposable
 
     async Task StartCore(bool restart, CancellationToken cancellationToken)
     {
-        await gate.WaitAsync(cancellationToken);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         bool starting = false;
         try
         {
@@ -55,30 +58,28 @@ sealed class DedicatedProxy : IDisposable
                 log($"[代理修复] 重启本启动器持有的内核 PID={process.Id}，运行时长={(DateTime.Now - process.StartTime).TotalSeconds:F0} 秒，内存={process.WorkingSet64 / 1048576} MiB，句柄={process.HandleCount}；保持节点、代理端口和 DNS 不变。");
             }
             cancellationToken.ThrowIfCancellationRequested();
-            StopCore();
+            if (!StopCore()) throw new IOException("旧代理或端口尚未释放，已取消启动替代内核。请查看退出检查日志。");
             starting = true;
             var dnsIp = IPAddress.Parse(DnsAddress);
-            using (var dnsUdp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
-                dnsUdp.Bind(new IPEndPoint(dnsIp, 53));
-            var dnsTcp = new TcpListener(dnsIp, 53);
-            try { dnsTcp.Start(); } finally { dnsTcp.Stop(); }
-            // Refuse to reuse an unrelated service on the dedicated port.
-            var probe = new TcpListener(IPAddress.Loopback, Port);
-            try { probe.Start(); } finally { probe.Stop(); }
+            var requestedPorts = new ProxyPorts(Port, dnsIp);
+            requestedPorts.RequireAvailable(log);
             var runtime = JsonNode.Parse(File.ReadAllText(config))!.AsObject();
             Register(runtime);
             runtime["log-level"] = "info";
             runtimeConfig = Path.Combine(Path.GetDirectoryName(config)!, $"runtime-{Environment.ProcessId}.json");
-            await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString(), cancellationToken);
+            await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString(), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             var psi = new ProcessStartInfo(EnginePath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             psi.ArgumentList.Add("-d"); psi.ArgumentList.Add(Path.GetDirectoryName(config)!);
             psi.ArgumentList.Add("-f"); psi.ArgumentList.Add(runtimeConfig);
             process?.Dispose();
             var candidate = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            candidate.Exited += (_, _) => { if (!stopping && ReferenceEquals(process, candidate)) UnexpectedExit?.Invoke(); };
+            try { candidate.Start(); } catch { candidate.Dispose(); throw; }
             process = candidate;
-            candidate.Exited += (_, _) => { if (ReferenceEquals(process, candidate)) UnexpectedExit?.Invoke(); };
-            candidate.Start();
+            // Retain the process handle returned by Start, never reacquire ownership via a port-table PID.
+            _ = candidate.SafeHandle;
+            ports = requestedPorts;
             fingerprint = hash;
             output = Task.WhenAll(ReadOutput(candidate.StandardOutput.BaseStream), ReadOutput(candidate.StandardError.BaseStream));
             log($"独立代理内核已启动，PID={candidate.Id}，SOCKS5=127.0.0.1:{Port}，DNS={DnsAddress}:53，规则=MATCH,RegionExit");
@@ -88,10 +89,10 @@ sealed class DedicatedProxy : IDisposable
                 if (candidate.HasExited) throw new IOException("独立代理内核启动失败，请检查节点配置。");
                 using var socket = new TcpClient();
                 try {
-                    await socket.ConnectAsync(IPAddress.Loopback, Port, cancellationToken);
-                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53, cancellationToken); return;
+                    await socket.ConnectAsync(IPAddress.Loopback, Port, cancellationToken).ConfigureAwait(false);
+                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53, cancellationToken).ConfigureAwait(false); return;
                 }
-                catch (SocketException) { await Task.Delay(100, cancellationToken); }
+                catch (SocketException) { await Task.Delay(100, cancellationToken).ConfigureAwait(false); }
             }
             throw new IOException("独立代理内核未就绪，程序没有启动。");
         }
@@ -116,16 +117,46 @@ sealed class DedicatedProxy : IDisposable
 
     public void Dispose()
     {
-        StopCore(); fingerprint = null;
+        gate.Wait();
+        try { if (StopCore()) fingerprint = null; }
+        finally { gate.Release(); }
     }
-    void StopCore()
+    public async Task<bool> StopAsync()
     {
-        var old = process; process = null;
+        await gate.WaitAsync().ConfigureAwait(false);
+        try { return await Task.Run(StopCore).ConfigureAwait(false); }
+        finally { gate.Release(); }
+    }
+    bool StopCore()
+    {
+        var old = process;
         if (old != null) {
-            try { if (!old.HasExited) old.Kill(entireProcessTree: true); old.WaitForExit(3000); output?.Wait(3000); }
-            catch (InvalidOperationException) { }
-            finally { old.Dispose(); output = null; }
+            stopping = true;
+            var watch = Stopwatch.StartNew();
+            try {
+                log($"[代理退出] 开始检查自有内核 PID={old.Id}，创建={old.StartTime:O}。");
+                // Mihomo runs as one process. Never walk descendants or kill a PID found by port lookup.
+                if (!old.HasExited) old.Kill();
+                if (!old.WaitForExit(10000)) {
+                    log($"[代理退出] PID={old.Id} 终止等待超时，未确认退出；保留句柄，不启动替代内核。");
+                    ports?.Snapshot(log); return false;
+                }
+                log($"[代理退出] PID={old.Id} 已确认退出，退出码={old.ExitCode}，耗时={watch.ElapsedMilliseconds}ms。");
+                if (output != null && !output.Wait(3000)) log("[代理退出] 日志管道尚未结束，关闭本次内核的读取端。");
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or AggregateException) {
+                log("[代理退出] 清理异常：" + ex.Message);
+                if (!old.HasExited) { ports?.Snapshot(log); return false; }
+            }
+            finally { stopping = false; }
+            old.Dispose(); process = null; output = null;
         }
-        if (runtimeConfig != null) { try { File.Delete(runtimeConfig); } catch (IOException) { } runtimeConfig = null; }
+        bool released = ports?.WaitForRelease(log) ?? true;
+        if (released) ports = null;
+        if (runtimeConfig != null) {
+            try { File.Delete(runtimeConfig); runtimeConfig = null; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log("[代理退出] 临时配置清理失败：" + ex.Message); }
+        }
+        return released;
     }
 }

@@ -10,6 +10,7 @@
     <Compile Include="../../src/ProxyConfiguration.cs" Link="ProxyConfiguration.cs" />
     <Compile Include="../../src/ProxySettingsDialog.cs" Link="ProxySettingsDialog.cs" />
     <Compile Include="../../src/DedicatedProxy.cs" Link="DedicatedProxy.cs" />
+    <Compile Include="../../src/ProxyPorts.cs" Link="ProxyPorts.cs" />
     <Compile Include="../../src/ProcessLog.cs" Link="ProcessLog.cs" />
   </ItemGroup>
 </Project>

@@ -20,6 +20,8 @@ static class TrayTests {
         var config = Path.Combine(data, "tray-session.ini"); var report = Path.Combine(data, "tray-processes.txt");
         File.WriteAllText(config, $"[session]\nJob={job}\nApplication={Environment.ProcessPath}\nArguments=--tray-fixture \"{report}\"\nLocale=en-US\nRegion=US\nGeo=244\nTimeZone=Pacific Standard Time\n", Encoding.Unicode);
         using var outside = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
+        string proxyReport = Path.Combine(data,"tray-proxy.txt");
+        using var proxyChild = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"--tray-proxy \"{proxyReport}\"") { UseShellExecute=false,CreateNoWindow=true })!;
         using var session = Process.Start(new ProcessStartInfo(Path.Combine(bin, "RegionSession.exe"), $"--locale-test \"{config}\"") { UseShellExecute = false, CreateNoWindow = true })!;
         try {
             PumpUntil(() => File.Exists(report) && new FileInfo(report).Length > 0);
@@ -28,6 +30,13 @@ static class TrayTests {
             type.GetField("session", Hidden)!.SetValue(form, session);
             type.GetField("currentJob", Hidden)!.SetValue(form, job);
             var proxy = type.GetField("dedicatedProxy", Hidden)!.GetValue(form)!;
+            PumpUntil(()=>File.Exists(proxyReport) && new FileInfo(proxyReport).Length>0);
+            var portNumbers = File.ReadAllText(proxyReport).Split(',').Select(int.Parse).ToArray();
+            var portsType = type.Assembly.GetType("ProxyPorts")!;
+            var ports = Activator.CreateInstance(portsType, BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic, null,
+                new object[]{portNumbers[0],System.Net.IPAddress.Parse("127.0.0.154"),portNumbers[1]},null)!;
+            proxy.GetType().GetField("process",Hidden)!.SetValue(proxy,Process.GetProcessById(proxyChild.Id));
+            proxy.GetType().GetField("ports",Hidden)!.SetValue(proxy,ports);
             ((Action)proxy.GetType().GetField("UnexpectedExit", Hidden)!.GetValue(proxy)!)();
             Application.DoEvents(); Thread.Sleep(150);
             Check(!session.HasExited && !root.HasExited && !child.HasExited && !outside.HasExited,
@@ -47,11 +56,16 @@ static class TrayTests {
             PumpUntil(() => form.IsDisposed);
             Check(pending.IsCanceled && session.HasExited && root.HasExited && child.HasExited, "Tray exit left a process group alive");
             Check(!outside.HasExited && !tray.Visible, "Tray exit affected outside process or left tray icon");
+            Check(proxyChild.HasExited,"Tray exit left its proxy alive");
+            Check(portsType.GetMethod("Check",Hidden)!.Invoke(ports,null)==null,"Tray exit left TCP/UDP proxy or DNS ports occupied");
+            string exitLogs=string.Join("",Directory.GetFiles(Path.Combine(data,"logs"),"*.log").Select(File.ReadAllText));
+            Check(exitLogs.Contains("[代理退出]") && exitLogs.Contains("[端口释放] 已确认") && exitLogs.Contains("退出清理完成"),"Tray cleanup evidence missing");
             Console.WriteLine("PASS: close-to-tray while preparing, menu restore, tray exit cancels pending work and stops real root/child job; outside process survives");
         } finally {
             try { using var stop = EventWaitHandle.OpenExisting(job + ".stop"); stop.Set(); } catch (WaitHandleCannotBeOpenedException) { }
             if (!session.HasExited) { if (!session.WaitForExit(5000)) session.Kill(true); }
             if (!outside.HasExited) { outside.Kill(); outside.WaitForExit(); }
+            if (!proxyChild.HasExited) { proxyChild.Kill(); proxyChild.WaitForExit(); }
         }
     }
 }

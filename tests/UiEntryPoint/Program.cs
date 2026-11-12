@@ -12,6 +12,18 @@ if (args.Length == 2 && args[0] == "--launch-result") {
 if (args.Length == 4 && args[0] == "--single-fixture") { SingleInstanceTests.Fixture(args); return; }
 if (args.Length == 3 && args[0] == "--single-test") { SingleInstanceTests.Run(args[1], args[2]); return; }
 if (args.Length > 0 && args[0] == "--tray-leaf") { Thread.Sleep(Timeout.Infinite); return; }
+if (args.Length == 2 && args[0] == "--tray-proxy") {
+    var loopback = System.Net.IPAddress.Loopback;
+    using var tcp = new System.Net.Sockets.TcpListener(loopback,0); tcp.Start();
+    int port = ((System.Net.IPEndPoint)tcp.LocalEndpoint).Port;
+    using var udp = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(loopback,port));
+    var dns = System.Net.IPAddress.Parse("127.0.0.154");
+    using var dnsTcp = new System.Net.Sockets.TcpListener(dns,0); dnsTcp.Start();
+    int dnsPort = ((System.Net.IPEndPoint)dnsTcp.LocalEndpoint).Port;
+    using var dnsUdp = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(dns,dnsPort));
+    File.WriteAllText(args[1],$"{port},{dnsPort}");
+    Thread.Sleep(Timeout.Infinite); return;
+}
 if (args.Length == 2 && args[0] == "--tray-fixture") {
     using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
     File.WriteAllText(args[1], $"{Environment.ProcessId},{child.Id}");

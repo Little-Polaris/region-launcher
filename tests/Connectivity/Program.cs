@@ -70,6 +70,7 @@ string configPath = Path.Combine(folder, "fixture-proxy.json");
 var config = ProxyConfiguration.Build(new JsonObject { ["type"] = "hysteria2", ["server"] = "192.0.2.1", ["port"] = 443, ["password"] = "fixture-password" }, 17890);
 await File.WriteAllTextAsync(configPath, config.ToJsonString()); ProxyConfiguration.ValidateRuntimePolicy(configPath);
 await ProxyOwnershipTests.Run(configPath);
+await ProxyShutdownTests.Run(folder);
 config["rules"] = new JsonArray("MATCH,DIRECT");
 await File.WriteAllTextAsync(configPath, config.ToJsonString());
 try { ProxyConfiguration.ValidateRuntimePolicy(configPath); throw new Exception("Direct routing accepted"); } catch (IOException) { }

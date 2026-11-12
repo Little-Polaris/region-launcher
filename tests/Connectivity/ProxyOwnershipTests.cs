@@ -32,7 +32,7 @@ static class ProxyOwnershipTests
             try { reservation.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.153"), 53)); }
             catch (SocketException) { reservation.Dispose(); reservation = null; }
             int ownedPid = owned.Id;
-            try { await proxy.RestartAsync(); throw new Exception("Occupied DNS was accepted"); } catch (SocketException) { }
+            try { await proxy.RestartAsync(); throw new Exception("Occupied DNS was accepted"); } catch (IOException) { }
             try { using var leftover = Process.GetProcessById(ownedPid); if (!leftover.HasExited) throw new Exception("Owned core survived restart"); }
             catch (ArgumentException) { }
             if (outside.HasExited) throw new Exception("Recovery stopped an outside process");

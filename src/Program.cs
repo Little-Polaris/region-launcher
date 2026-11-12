@@ -118,7 +118,10 @@ sealed class Launcher : Form
         });
         configureProxy.Click += (_, _) => {
             using var dialog = new ProxySettingsDialog(dedicatedProxy);
-            if (dialog.ShowDialog(this) == DialogResult.OK) { dedicatedProxy.Dispose(); RefreshProxy(); Append("独立代理配置已保存；旧内核已停止，下次检测或启动使用新节点。"); }
+            if (dialog.ShowDialog(this) == DialogResult.OK) {
+                dedicatedProxy.Dispose(); RefreshProxy();
+                Append(dedicatedProxy.CleanupComplete ? "独立代理配置已保存；旧内核及端口已清理，下次检测或启动使用新节点。" : "独立代理配置已保存，但旧内核或端口尚未释放；未启动新节点，详情见退出检查日志。");
+            }
         };
         proxy.Controls.Add(checkProxy); proxy.Controls.Add(configureProxy); grid.Controls.Add(proxy, 1, 5); grid.SetColumnSpan(proxy, 2);
         country.SetOptions(WindowsSettings.Regions().Cast<object>().ToArray());
@@ -213,6 +216,10 @@ sealed class Launcher : Form
         // Retry the stop signal while a newly created session is still creating its event.
         while (!pending.IsCompleted || session is { HasExited: false }) { SignalSessionStop(); await Task.Delay(100); }
         try { await pending; } catch (Exception ex) { Append("结束后台操作：" + ex.Message); }
+        try {
+            bool released = await dedicatedProxy.StopAsync();
+            Append(released ? "退出清理完成：本启动器没有待清理的代理或端口。" : "退出清理未完全通过，详情已写入日志；未结束其他程序。");
+        } catch (Exception ex) { Append("退出清理未完成：" + ex.Message); }
         allowClose = true; tray.Visible = false; Close();
     }
     void UpdateActions()
