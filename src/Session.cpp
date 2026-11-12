@@ -107,12 +107,13 @@ static HANDLE requestNetwork(HANDLE ready, HANDLE stop) {
     }
     return (HANDLE)(uintptr_t)reply.worker;
 }
-static bool x64Image(const std::wstring& path) {
+static bool supportedImage(const std::wstring& path) {
     FILE* f = nullptr; if (_wfopen_s(&f, path.c_str(), L"rb") || !f) return false;
     IMAGE_DOS_HEADER dos = {}; bool valid = fread(&dos, sizeof(dos), 1, f) == 1 && dos.e_magic == IMAGE_DOS_SIGNATURE && dos.e_lfanew > 0;
     DWORD signature = 0; IMAGE_FILE_HEADER header = {};
     if (valid) valid = _fseeki64(f, dos.e_lfanew, SEEK_SET) == 0 && fread(&signature, sizeof(signature), 1, f) == 1 &&
-        fread(&header, sizeof(header), 1, f) == 1 && signature == IMAGE_NT_SIGNATURE && header.Machine == IMAGE_FILE_MACHINE_AMD64;
+        fread(&header, sizeof(header), 1, f) == 1 && signature == IMAGE_NT_SIGNATURE &&
+        (header.Machine == IMAGE_FILE_MACHINE_AMD64 || header.Machine == IMAGE_FILE_MACHINE_I386);
     fclose(f); return valid;
 }
 static bool configureEnvironment() {
@@ -161,7 +162,7 @@ static bool configureEnvironment() {
 }
 static int run(bool localeOnly, bool joining = false, bool inject = true) {
     struct BrokerCleanup { ~BrokerCleanup() { StopConnectBroker(); } } brokerCleanup;
-    auto app = get(L"Application"); if (!x64Image(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"This build requires an x64 Windows executable"); }
+    auto app = get(L"Application"); if (!supportedImage(app)) { SetLastError(ERROR_BAD_EXE_FORMAT); return error(L"Expected an x86 or x64 Windows executable"); }
     if (!configureEnvironment()) return error(L"Invalid Windows country, language or time zone settings");
     SetEnvironmentVariableW(L"REGION_LAUNCHER_NETWORK", localeOnly ? nullptr : L"1");
     if (!localeOnly) {

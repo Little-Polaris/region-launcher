@@ -84,9 +84,11 @@ int wmain(int argc, wchar_t** argv) {
     if (sixW != INVALID_SOCKET) closesocket(sixW); if (sixA != INVALID_SOCKET) closesocket(sixA); if (icmp != INVALID_HANDLE_VALUE) IcmpCloseHandle(icmp);
     DWORD count = 0; DNS_CUSTOM_SERVER* servers = nullptr;
     DNS_APPLICATION_SETTINGS settings = {DNS_APP_SETTINGS_VERSION1};
-    DWORD error = DnsGetApplicationSettings(&count, &servers, &settings);
+    auto getSettings = reinterpret_cast<decltype(&DnsGetApplicationSettings)>(GetProcAddress(GetModuleHandleW(L"dnsapi.dll"), "DnsGetApplicationSettings"));
+    auto freeServers = reinterpret_cast<decltype(&DnsFreeCustomServers)>(GetProcAddress(GetModuleHandleW(L"dnsapi.dll"), "DnsFreeCustomServers"));
+    DWORD error = getSettings && freeServers ? getSettings(&count, &servers, &settings) : ERROR_CALL_NOT_IMPLEMENTED;
     printf("settings status=%lu servers=%lu exclusive=%llu\n", error, count, settings.Flags);
-    if (servers) DnsFreeCustomServers(&count, &servers);
+    if (servers) freeServers(&count, &servers);
     PDNS_RECORD rec = nullptr;
     DWORD status = DnsQuery_W(argv[1], DNS_TYPE_A, DNS_QUERY_STANDARD, nullptr, &rec, nullptr);
     records("DnsQueryW", status, rec);

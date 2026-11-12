@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -21,12 +22,19 @@ with zipfile.ZipFile(args.archive) as archive:
         'docs/applications.md',
         'docs/connectivity.md',
         'app/RegionSession.exe', 'app/RegionHook.dll', 'install/request_install.ps1',
+        'app/RegionHook32.dll', 'app/RegionInject32.exe', 'app/RegionInject64.exe',
         'install/package/install_service.ps1', 'install/package/RegionNetworkService.exe',
         'install/package/ProxyBridgeCore.dll', 'install/package/WinDivert.dll',
         'install/package/WinDivert64.sys', '安装或更新后台服务.cmd', '卸载后台服务.cmd',
     ):
         assert required in names, f'Missing runtime dependency: {required}'
     assert archive.testzip() is None, 'Corrupt ZIP member'
+    for filename, machine in [('RegionHook.dll', 0x8664), ('RegionHook32.dll', 0x14c),
+                              ('RegionInject64.exe', 0x8664), ('RegionInject32.exe', 0x14c),
+                              ('RegionProbe32.exe', 0x14c), ('DnsProbe32.exe', 0x14c)]:
+        image = archive.read('app/'+filename)
+        pe = struct.unpack_from('<I', image, 0x3c)[0]
+        assert image[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', image, pe+4)[0] == machine, filename
     assert not any('/data/' in '/'+name or '/private/' in '/'+name or name.endswith('/proxy.json') for name in names), 'Private runtime configuration included'
     manifest = json.loads(archive.read('install/package/manifest.json'))
     for name, expected in manifest['files'].items():

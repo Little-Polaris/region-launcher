@@ -7,6 +7,12 @@
 #include <string>
 
 int wmain(int argc, wchar_t** argv) {
+    printf("BITS=%u\n", unsigned(sizeof(void*) * 8));
+    WCHAR registryLocale[128] = {}, registryZone[128] = {};
+    DWORD localeBytes = sizeof(registryLocale), zoneBytes = sizeof(registryZone);
+    auto localeStatus = RegGetValueW(HKEY_CURRENT_USER, L"Control Panel\\International", L"LocaleName", RRF_RT_REG_SZ, nullptr, registryLocale, &localeBytes);
+    auto zoneStatus = RegGetValueW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\TimeZoneInformation", L"TimeZoneKeyName", RRF_RT_REG_SZ, nullptr, registryZone, &zoneBytes);
+    wprintf(L"REGISTRY=%s|%s status=%lu,%lu\n", registryLocale, registryZone, localeStatus, zoneStatus);
     WCHAR locale[LOCALE_NAME_MAX_LENGTH] = {}, region[32] = {};
     GetUserDefaultLocaleName(locale, _countof(locale)); GetUserDefaultGeoName(region, _countof(region));
     DYNAMIC_TIME_ZONE_INFORMATION tz = {}; DWORD season = GetDynamicTimeZoneInformation(&tz);
@@ -16,7 +22,7 @@ int wmain(int argc, wchar_t** argv) {
         tz.DynamicDaylightTimeDisabled, season, local.wHour, utc.wHour);
     if (GetEnvironmentVariableW(L"REGION_PROBE_HOOK_PATH", nullptr, 0)) {
         WCHAR module[32768] = {};
-        if (HMODULE hook = GetModuleHandleW(L"RegionHook.dll")) GetModuleFileNameW(hook, module, _countof(module));
+        if (HMODULE hook = GetModuleHandleW(sizeof(void*) == 4 ? L"RegionHook32.dll" : L"RegionHook.dll")) GetModuleFileNameW(hook, module, _countof(module));
         char utf8[131072] = {}; WideCharToMultiByte(CP_UTF8, 0, module, -1, utf8, sizeof(utf8), nullptr, nullptr);
         printf("HOOK_PATH=%s\n", utf8);
     }
@@ -110,6 +116,10 @@ int wmain(int argc, wchar_t** argv) {
     }
     WCHAR self[32768]; GetModuleFileNameW(nullptr, self, _countof(self));
     std::wstring cmd = L"\"" + std::wstring(self) + L"\" --child";
+    if (argc >= 3 && !wcscmp(argv[1], L"--spawn-other")) {
+        wcscpy_s(self, argv[2]); cmd = L"\"" + std::wstring(self) + L"\"";
+        cmd += argc >= 4 ? L" --spawn-other \"" + std::wstring(argv[3]) + L"\"" : L" --child";
+    }
     if (argc >= 4 && !wcscmp(argv[1], L"--spawn-network")) {
         cmd = L"\"" + std::wstring(self) + L"\" --network " + argv[2] + L" " + argv[3] + L" 2000";
     }

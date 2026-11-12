@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = Path(os.environ.get('REGION_TEST_BIN', ROOT / 'build/service-bin'))
+PROBE = os.environ.get('REGION_DNS_PROBE', 'DnsProbe.exe')
 OUT = ROOT / 'build/test-results/unified-dns'
 OUT.mkdir(parents=True, exist_ok=True)
 seen = []
@@ -71,7 +72,7 @@ class TCP6(socketserver.ThreadingTCPServer):
 
 
 def outside(label, env=None):
-    p = subprocess.run([str(BIN/'DnsProbe.exe'), domain, 'leaf'] + (['raw'] if full_network else []), capture_output=True, text=True, timeout=45, env=env)
+    p = subprocess.run([str(BIN/PROBE), domain, 'leaf'] + (['raw'] if full_network else []), capture_output=True, text=True, timeout=45, env=env)
     (OUT/(label+'.txt')).write_text(p.stdout+p.stderr, encoding='utf8')
     assert p.returncode == 0, p
     assert 'servers=0' in p.stdout and '203.0.113.77' not in p.stdout, p.stdout
@@ -90,7 +91,7 @@ with ExitStack() as stack:
     cfg = OUT/'session.ini'
     cfg.write_text(f'''[session]
 Job=Local\\RegionLauncher.{uuid.uuid4().hex}
-Application={BIN/'DnsProbe.exe'}
+Application={BIN/PROBE}
 Arguments={domain} child {'raw' if full_network else ''}
 DnsAddress={inside_address}
 ProxyHost=127.0.0.1
@@ -153,7 +154,7 @@ AutoDst=1
         print('PASS: IPv6 link-local TCP/UDP blocked inside with no hooks; outside same endpoints work')
     if '--failure' in sys.argv:
         domain = 'www.example.com'
-        baseline = subprocess.run([str(BIN/'DnsProbe.exe'),domain],capture_output=True,text=True,timeout=45)
+        baseline = subprocess.run([str(BIN/PROBE),domain],capture_output=True,text=True,timeout=45)
         assert 'getaddrinfo status=0 ip=' in baseline.stdout, baseline.stdout
         refuse = True
         # A valid name is already in the host cache; the private DNS refusal must win.

@@ -1,6 +1,7 @@
 """Native asynchronous UDP APIs, source restoration and association recovery."""
 from pathlib import Path
 import json
+import os
 import shutil
 import socket
 import struct
@@ -15,7 +16,7 @@ OUT = ROOT/'build/test-results/datagram-broker'
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    app = OUT/'chrome.exe'; shutil.copy2(ROOT/'build/DatagramProbe.exe', app)
+    app = OUT/'chrome.exe'; shutil.copy2(ROOT/'build'/os.environ.get('REGION_DATAGRAM_BINARY', 'DatagramProbe.exe'), app)
     listener = socket.socket(); listener.bind(('127.0.0.1', 0)); listener.listen(); listener.settimeout(.2)
     stop = threading.Event(); errors = []; requests = []; threads = []
 

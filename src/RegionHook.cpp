@@ -141,14 +141,14 @@ static BOOL WINAPI createW(LPCWSTR app, LPWSTR cmd, LPSECURITY_ATTRIBUTES pa, LP
     BOOL inherit, DWORD flags, LPVOID env, LPCWSTR cwd, LPSTARTUPINFOW si, LPPROCESS_INFORMATION pi) {
     try {
         auto block = ChildEnvironment::build(env, flags, *childEnvironment);
-        return FinishUnicodeChild(realCreateW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath);
+        return FinishUnicodeChild(realCreateW(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath, realCreateW);
     } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }
 }
 static BOOL WINAPI createA(LPCSTR app, LPSTR cmd, LPSECURITY_ATTRIBUTES pa, LPSECURITY_ATTRIBUTES ta,
     BOOL inherit, DWORD flags, LPVOID env, LPCSTR cwd, LPSTARTUPINFOA si, LPPROCESS_INFORMATION pi) {
     try {
         auto block = ChildEnvironment::build(env, flags, *childEnvironment);
-        return FinishUnicodeChild(realCreateA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath);
+        return FinishUnicodeChild(realCreateA(app, cmd, pa, ta, inherit, flags | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, block.data(), cwd, si, pi), flags, pi, dllPath, realCreateW);
     } catch (...) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return FALSE; }
 }
 extern "C" __declspec(dllexport) void RegionHookMarker() {}

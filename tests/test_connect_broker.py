@@ -1,5 +1,6 @@
 """Real Winsock calls and child injection, with a local SOCKS fixture and UU left running."""
 import json
+import os
 from pathlib import Path
 import shutil
 import socket
@@ -26,7 +27,7 @@ def exact(stream, size):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     app = OUT / 'chrome.exe'
-    shutil.copy2(BIN / 'RegionProbe.exe', app)
+    shutil.copy2(BIN / os.environ.get('REGION_PROBE_BINARY', 'RegionProbe.exe'), app)
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
     listener.listen()

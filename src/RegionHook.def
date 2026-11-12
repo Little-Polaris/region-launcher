@@ -1,3 +1,2 @@
-LIBRARY RegionHook
 EXPORTS
     RegionHookMarker @1

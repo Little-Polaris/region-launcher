@@ -10,7 +10,7 @@ $packages = Join-Path $output 'packages'
 $licenses = Join-Path $app 'licenses'
 $version = ([xml](Get-Content "$root/src/RegionLauncher.csproj" -Raw)).Project.PropertyGroup.Version
 New-Item -ItemType Directory -Force -Path $app,$docs,$packages,$licenses | Out-Null
-$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','RegionSession.exe','RegionHook.dll','RegionProbe.exe','DnsProbe.exe')
+$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','RegionSession.exe','RegionHook.dll','RegionHook32.dll','RegionInject32.exe','RegionInject64.exe','RegionProbe.exe','RegionProbe32.exe','DnsProbe.exe','DnsProbe32.exe')
 foreach ($file in $files) {
     $from = Join-Path $bin $file; $to = Join-Path $app $file
     if (!(Test-Path $to) -or (Get-FileHash $from).Hash -ne (Get-FileHash $to).Hash) {
