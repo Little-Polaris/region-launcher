@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$JavaHome,
     [Parameter(Mandatory)][string]$Sdk,
-    [Parameter(Mandatory)][string]$Gradle,
+    [string]$Gradle=(Join-Path $PSScriptRoot '../gradlew.bat'),
     [string]$Proxy='',
     [switch]$Release
 )

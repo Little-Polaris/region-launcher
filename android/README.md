@@ -30,12 +30,14 @@ Android 工程与 Windows 工程分别构建，不改动 Windows 后台服务。
 
 依赖：JDK 25、Gradle 9.5.0、Android SDK platform 37、build-tools 36.0.0；AGP 固定为 9.3.1。Go、NDK 的官方下载与校验值见 scripts/toolchain-lock.json，Mihomo 固定为 v1.19.33，完整 Go 依赖校验值见 native/go.sum。
 
+用 Android Studio 打开本目录，Gradle 使用项目的 `gradle/wrapper/gradle-wrapper.properties`。Wrapper 固定 Gradle 9.5.0 并校验官方下载包 SHA-256，构建脚本默认使用相同 Wrapper。AGP 9.3.1 不兼容 Gradle 9.3.0；缺少 Wrapper 时 IDE 自动选择旧版会报 `ProjectTypeBinding` 缺失，反复同步或重启不能解决版本不匹配。
+
 在仓库根目录执行：
 
 ```powershell
 python android/scripts/prepare-tools.py go ndk
 pwsh android/scripts/build-native.ps1
-pwsh android/scripts/build-app.ps1 -JavaHome '<JDK目录>' -Sdk '<SDK目录>' -Gradle '<gradle.bat路径>' -Release
+pwsh android/scripts/build-app.ps1 -JavaHome '<JDK目录>' -Sdk '<SDK目录>' -Release
 python android/scripts/package.py --java-home '<JDK目录>' --sdk '<SDK目录>'
 ```
 
