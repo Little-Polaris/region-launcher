@@ -31,8 +31,36 @@ closing handles in other processes is not an implemented recovery mechanism.
 The launcher runtime is unchanged by this experiment. The live 17890 incident
 had already been cleared by a reboot and was not reproduced here.
 
+## External close acceptance check
+
+```powershell
+python experiments/port-recovery/forced_close.py
+```
+
+This second fixture creates its own child and uses the retained child process
+handle to close exactly its known listening socket with
+`DuplicateHandle(DUPLICATE_CLOSE_SOURCE)`. It accepts no external PID, handle,
+or port. The original port becomes bindable, but the child still has the old
+socket object. When the child allocates another socket with the recycled
+handle value, normal cleanup of the old object closes the new socket. All
+three local runs reproduced WSAENOTSOCK (10038) on the unrelated new socket.
+
+This is a passing regression demonstration of an unsafe proposed recovery,
+not a successful acceptance test for a launcher feature. Checking the
+original handle identity immediately before the forced close cannot prevent
+later reuse in the affected process. The runtime therefore does not include
+this forced-close operation.
+
+A separate one-shot probe of the private AFD_UNBIND control (0x12113) using
+AF_INET and the respective TCP/UDP protocol on newly created idle loopback
+sockets returned STATUS_INVALID_PARAMETER (TCP) and STATUS_NOT_SUPPORTED
+(UDP). Both exclusive binds remained blocked with 10048. No existing proxy
+or application handles were used. This did not establish a usable alternative.
+
 References:
 
 - [Microsoft: shared sockets](https://learn.microsoft.com/en-us/windows/win32/winsock/shared-sockets-2)
 - [Microsoft: handle inheritance](https://learn.microsoft.com/en-us/windows/win32/sysinfo/handle-inheritance)
 - [Microsoft: closesocket](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-closesocket)
+- [Microsoft: DuplicateHandle socket restrictions](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle)
+- [System Informer: native AFD definitions](https://github.com/winsiderss/systeminformer/blob/master/phnt/include/ntafd.h)
