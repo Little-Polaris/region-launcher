@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Diagnostics;
 
+if (ListenerRecovery.TryRun(args)) return;
+if (args.Length == 3 && args[0] == "--listener-tests") { await ListenerRecoveryTests.Run(args[1], args[2]); return; }
 if (args.Length == 1 && args[0] == "--hold") { await Task.Delay(60000); return; }
 if (args.Length == 2 && args[0] == "--recovery-child") { await RecoveryLive.Child(args[1]); return; }
 

@@ -7,6 +7,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (ListenerRecovery.TryRun(args)) return;
         if (args.Length == 2 && args[0] == "--network-probe") {
             try {
                 var results = ProxyHealth.ProbeAsync(null, Console.WriteLine).GetAwaiter().GetResult();
@@ -332,7 +333,7 @@ sealed class Launcher : Form
     async Task CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
-        Append("开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。");
+        Append("开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。端口残留时会结束确证持有旧监听引用的进程，请先保存工作。");
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
         var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token);
         shutdown.Token.ThrowIfCancellationRequested();

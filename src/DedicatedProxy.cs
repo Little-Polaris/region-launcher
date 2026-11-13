@@ -58,7 +58,8 @@ sealed class DedicatedProxy : IDisposable
                 log($"[代理修复] 重启本启动器持有的内核 PID={process.Id}，运行时长={(DateTime.Now - process.StartTime).TotalSeconds:F0} 秒，内存={process.WorkingSet64 / 1048576} MiB，句柄={process.HandleCount}；保持节点、代理端口和 DNS 不变。");
             }
             cancellationToken.ThrowIfCancellationRequested();
-            if (!StopCore()) throw new IOException("旧代理或端口尚未释放，已取消启动替代内核。请查看退出检查日志。");
+            if (!await Task.Run(() => StopCore(true), cancellationToken).ConfigureAwait(false))
+                throw new IOException("旧代理或端口尚未释放，已取消启动替代内核。请查看端口回收日志。");
             starting = true;
             var dnsIp = IPAddress.Parse(DnsAddress);
             var requestedPorts = new ProxyPorts(Port, dnsIp);
@@ -124,10 +125,10 @@ sealed class DedicatedProxy : IDisposable
     public async Task<bool> StopAsync()
     {
         await gate.WaitAsync().ConfigureAwait(false);
-        try { return await Task.Run(StopCore).ConfigureAwait(false); }
+        try { return await Task.Run(() => StopCore()).ConfigureAwait(false); }
         finally { gate.Release(); }
     }
-    bool StopCore()
+    bool StopCore(bool recoverListeners = false)
     {
         var old = process;
         if (old != null) {
@@ -149,10 +150,17 @@ sealed class DedicatedProxy : IDisposable
                 if (!old.HasExited) { ports?.Snapshot(log); return false; }
             }
             finally { stopping = false; }
-            old.Dispose(); process = null; output = null;
+            output = null;
         }
         bool released = ports?.WaitForRelease(log) ?? true;
-        if (released) ports = null;
+        if (!released && recoverListeners && old != null && old.HasExited) {
+            log("[端口回收] 原代理已退出但原端口仍占用；开始核验旧监听引用，确证持有者将被结束，可能丢失未保存内容。");
+            try { ListenerRecovery.RecoverAsync(old, ports!, log).GetAwaiter().GetResult(); }
+            catch (Exception ex) { log("[端口回收] 检查失败：" + ex.Message); }
+            released = ports!.WaitForRelease(log);
+        }
+        // Keep the original process identity until the old endpoints have gone; a port-table PID is not ownership.
+        if (released) { old?.Dispose(); process = null; ports = null; }
         if (runtimeConfig != null) {
             try { File.Delete(runtimeConfig); runtimeConfig = null; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log("[代理退出] 临时配置清理失败：" + ex.Message); }

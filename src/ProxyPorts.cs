@@ -13,6 +13,41 @@ sealed class ProxyPorts(int proxyPort, IPAddress dnsAddress, int dnsPort = 53)
     }
     readonly Endpoint[] endpoints = [new(IPAddress.Loopback, proxyPort, ProtocolType.Tcp),
         new(IPAddress.Loopback, proxyPort, ProtocolType.Udp), new(dnsAddress, dnsPort, ProtocolType.Tcp), new(dnsAddress, dnsPort, ProtocolType.Udp)];
+    internal Endpoint[] Endpoints => endpoints;
+    internal record Row(Endpoint Endpoint, int Pid, int State);
+    internal Row[] ListenerRows()
+    {
+        List<Row> rows = [];
+        foreach (bool tcp in new[] { true, false }) {
+            nint buffer = 0;
+            try {
+                int size = 0;
+                uint Read(nint data, ref int bytes) => tcp ? GetExtendedTcpTable(data, ref bytes, false, 2, 5, 0) : GetExtendedUdpTable(data, ref bytes, false, 2, 1, 0);
+                uint result = Read(0, ref size);
+                if (result != 0 && result != 122) throw new IOException($"端口表错误={result}");
+                for (int attempt = 0; attempt < 5; attempt++) {
+                    if (buffer != 0) { Marshal.FreeHGlobal(buffer); buffer = 0; }
+                    buffer = Marshal.AllocHGlobal(Math.Max(size, 4));
+                    result = Read(buffer, ref size);
+                    if (result != 122) break;
+                }
+                if (result != 0) throw new IOException($"端口表错误={result}");
+                int count = Marshal.ReadInt32(buffer), stride = tcp ? 24 : 12;
+                if (count < 0 || count > (size - 4) / stride) throw new IOException("端口表长度不正确。");
+                for (int i = 0; i < count; i++) {
+                    nint row = buffer + 4 + i * stride;
+                    int state = tcp ? Marshal.ReadInt32(row) : 0;
+                    if (tcp && state != 2) continue;
+                    var address = new IPAddress(unchecked((uint)Marshal.ReadInt32(row, tcp ? 4 : 0)));
+                    int offset = tcp ? 8 : 4;
+                    var endpoint = new Endpoint(address, Marshal.ReadByte(row, offset) * 256 + Marshal.ReadByte(row, offset + 1), tcp ? ProtocolType.Tcp : ProtocolType.Udp);
+                    if (endpoints.Any(e => e.Protocol == endpoint.Protocol && e.Port == endpoint.Port && (e.Address.Equals(address) || address.Equals(IPAddress.Any))))
+                        rows.Add(new(endpoint, Marshal.ReadInt32(row, tcp ? 20 : 8), state));
+                }
+            } finally { if (buffer != 0) Marshal.FreeHGlobal(buffer); }
+        }
+        return rows.ToArray();
+    }
 
     internal (Endpoint Endpoint, SocketException Error)? Check()
     {
