@@ -48,13 +48,17 @@ sealed class DiagnosticLog : IDisposable
             return line;
         }
     }
-    public void CaptureNetworkLog(string label)
+    public void CaptureNetworkLog(string label, string? path = null)
     {
         try {
-            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "RegionLauncherNetwork", "logs", "network.log");
+            path ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "RegionLauncherNetwork", "logs", "network.log");
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            file.Seek(Math.Max(0, file.Length - 512 * 1024), SeekOrigin.Begin);
-            using var reader = new StreamReader(file);
+            long end = file.Length, start = Math.Max(0, end - 512 * 1024);
+            file.Seek(start, SeekOrigin.Begin);
+            byte[] bytes = new byte[(int)(end - start)]; int count = 0;
+            while (count < bytes.Length) { int read = file.Read(bytes, count, bytes.Length - count); if (read == 0) break; count += read; }
+            using var reader = new StringReader(Encoding.UTF8.GetString(bytes, 0, count));
+            if (start > 0) reader.ReadLine(); // Discard an incomplete leading line, including split UTF-8 characters.
             Write($"[{label}] 后台网络日志快照（末尾最多 512 KiB）");
             while (reader.ReadLine() is string line) Write("[网络服务] " + line);
         } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Write("后台日志暂不可读：" + ex.Message); }

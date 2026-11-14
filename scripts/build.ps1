@@ -43,6 +43,7 @@ try {
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'src/InjectHelper.cpp'),'/link','/DYNAMICBASE','/NXCOMPAT',"/OUT:$bin/RegionInject64.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/HttpProbe.cpp'),'/link','winhttp.lib',"/OUT:$build/HttpProbe64.exe")
     RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/LanRoute.cpp'),'/link',"/OUT:$build/LanRouteTest.exe")
+    RunCompiler @('/nologo','/O2','/MT','/EHsc','/std:c++17','/utf-8',(Join-Path $root 'tests/SharedLogWriter.cpp'),'/link',"/OUT:$build/SharedLogWriter.exe")
     foreach ($file in @('WinDivert.dll','WinDivert64.sys')) {
         $source = Join-Path "$wd/x64" $file; $target = Join-Path $bin $file
         if (!(Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {

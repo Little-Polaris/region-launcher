@@ -47,11 +47,14 @@ if (args.Length >= 4 && args[1] == "--live") {
 void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
 using var direct = new TcpListener(IPAddress.Loopback, 0); direct.Start();
 string url = $"http://127.0.0.1:{((IPEndPoint)direct.LocalEndpoint).Port}/trace";
-foreach (string mode in new[] { "reject", "invalid", "success", "timeout" }) {
+foreach (string mode in new[] { "reject", "invalid", "success", "timeout", "stall", "body-stall", "oversized" }) {
     using var socks = new FakeSocks(mode);
-    var results = await ProxyHealth.ProbeAsync(socks.Port, _ => { }, [new("Fixture", url, true)], TimeSpan.FromMilliseconds(mode == "timeout" ? 300 : 3000));
+    var results = await ProxyHealth.ProbeAsync(socks.Port, _ => { }, [new("Fixture", url, true)], TimeSpan.FromMilliseconds(mode is "timeout" or "stall" or "body-stall" ? 500 : 3000));
     Assert(results[0].Ok == (mode == "success"), "Handshake-only or invalid content incorrectly counted as usable internet");
     if (mode == "success") Assert(results[0].Ip == "203.0.113.7", "Exit parse failed");
+    if (mode is "timeout" or "stall") Assert(results[0].Stage == "连接/握手/响应头" && results[0].Error == "请求超时", "Pre-header timeout stage missing");
+    if (mode == "body-stall") Assert(results[0].Stage == "读取响应正文" && results[0].Status == 200 && results[0].Error == "请求超时", "Body timeout lost its deadline or response status");
+    if (mode == "oversized") Assert(results[0].Error!.Contains("64 KiB"), "Oversized response accepted");
     Assert(!direct.Pending(), "Request fell back to direct connection");
     Assert(socks.Handshake, "SOCKS handshake not attempted");
 }
@@ -87,6 +90,7 @@ string text = string.Join("", Directory.GetFiles(logDirectory, "launcher-*.log")
 Assert(text.Contains("中文日志🚀") && !text.Contains("abcdef") && !text.Contains("long-fixture-password") && !text.Contains("user:password"), "Log redaction or Unicode failed");
 Assert(!text.Contains("hidden-bearer-value") && !text.Contains("hidden-json-value"), "Structured credentials not redacted");
 Assert(Directory.GetFiles(logDirectory, "launcher-*.log").Length <= 10, "Log retention failed");
+await SharedLogTests.Run(folder);
 Console.WriteLine("PASS: handshake-only failure, content validation, timeout, no direct fallback, exit comparison, pinned routing, persistent UTF-8/redacted logs and retention");
 
 sealed class FakeSocks : IDisposable
@@ -114,6 +118,11 @@ sealed class FakeSocks : IDisposable
             var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, true);
             while (await reader.ReadLineAsync(cancel.Token) is string line && line.Length > 0) { }
             string body = mode == "success" ? "ip=203.0.113.7\nloc=US\n" : "<html>not an IP response</html>";
+            if (mode == "body-stall") {
+                await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nx"), cancel.Token);
+                await Task.Delay(10000, cancel.Token); return;
+            }
+            if (mode == "oversized") body = new string('x', 65537);
             await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}"), cancel.Token);
         } catch (OperationCanceledException) { } catch (IOException) { }
     }

@@ -16,7 +16,7 @@ static class EnvironmentCheck
         psi.ArgumentList.Add(existingJob == null ? "--run" : "--join"); psi.ArgumentList.Add(config);
         log($"环境内实际联网检测开始，编号 {id}");
         using var process = Process.Start(psi) ?? throw new IOException("无法启动环境检测程序。");
-        var reads = Task.WhenAll(ProcessLog.ReadAsync(process.StandardOutput.BaseStream, s => log("[环境检测] " + s)), ProcessLog.ReadAsync(process.StandardError.BaseStream, s => log("[环境检测] " + s)));
+        var reads = Task.WhenAll(ProcessLog.ReadAsync(process.StandardOutput.BaseStream, s => log($"[环境检测 {id}] " + s)), ProcessLog.ReadAsync(process.StandardError.BaseStream, s => log($"[环境检测 {id}] " + s)));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(60));
         try {
             await process.WaitForExitAsync(timeout.Token);

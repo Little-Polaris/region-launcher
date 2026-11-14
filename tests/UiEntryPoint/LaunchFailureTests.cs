@@ -33,11 +33,28 @@ static class LaunchFailureTests
             };
             psi.ArgumentList.Add("--launch-result"); psi.ArgumentList.Add(started ? "started" : "failed");
             using var process = Process.Start(psi)!;
-            var task = (Task)type.GetMethod("MonitorLaunch", Hidden)!.Invoke(form, new object[] { process })!;
+            var task = (Task)type.GetMethod("MonitorLaunch", Hidden)!.Invoke(form, new object[] { process, null })!;
             Pump(task);
             Check(started ? task.IsCompletedSuccessfully : task.Exception?.InnerException is IOException, "Wrong launch result classification");
         }
         form.Hide();
+        // A retiring application must not release the next operation's preparation state.
+        var begin = type.GetMethod("BeginPreparation", Hidden)!;
+        var end = type.GetMethod("EndPreparation", Hidden)!;
+        object[] first = { 0L }; Check((bool)begin.Invoke(form, first)!, "First preparation rejected");
+        using (var delayed = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--launch-result started-delay") {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!) {
+            object[] next = { 0L }; bool acknowledged = false;
+            Action ready = () => { acknowledged = true; end.Invoke(form, first); Check((bool)begin.Invoke(form, next)!, "Next preparation blocked after STARTED"); };
+            var monitor = (Task)type.GetMethod("MonitorLaunch", Hidden)!.Invoke(form, new object[] { delayed, ready })!;
+            Check((bool)type.GetField("preparing", Hidden)!.GetValue(form)!, "Released preparation before STARTED");
+            Pump(monitor); monitor.GetAwaiter().GetResult(); end.Invoke(form, first);
+            Check(acknowledged && (bool)type.GetField("preparing", Hidden)!.GetValue(form)!, "Old exit cleared new preparation");
+            object[] overlap = { 0L }; Check(!(bool)begin.Invoke(form, overlap)!, "Overlapping check accepted");
+            Check(!((Button)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Enabled, "Manual check enabled during preparation");
+            end.Invoke(form, next);
+        }
+        Console.WriteLine("PASS: startup acknowledgement gates preparation; old process exit preserves newer preparation and rejects overlapping checks");
         var failure = (Task)type.GetMethod("StartSession", Hidden)!.Invoke(form, null)!;
         Pump(failure); failure.GetAwaiter().GetResult();
         Check(dialogs == 0, "Hidden failure opened a modal dialog");

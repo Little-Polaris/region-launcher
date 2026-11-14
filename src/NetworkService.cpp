@@ -9,6 +9,7 @@
 #include <vector>
 #include "NetworkProtocol.h"
 #include "ProxyBridge.h"
+#include "SharedNetworkLog.h"
 
 static HANDLE shutdownEvent, activeWorker, activeJob;
 static SERVICE_STATUS_HANDLE statusHandle;
@@ -179,7 +180,7 @@ static int worker(int argc, WCHAR** argv) {
     scopeJob=h[0]; auto port=wcstoul(argv[8],nullptr,10), dns=wcstoul(argv[9],nullptr,10), loopback=wcstoul(argv[10],nullptr,10);
     if (!port || port>65535 || loopback>1 || (dns && (ntohl(dns)>>24)!=127)) return ERROR_INVALID_PARAMETER;
     // Only this protected installation supplies privileged code and logs.
-    _wfopen_s(&networkLog, (directory()+L"\\logs\\network.log").c_str(), L"wb");
+    networkLog = OpenNetworkLog((directory()+L"\\logs\\network.log").c_str());
     HMODULE core=LoadLibraryExW((directory()+L"\\ProxyBridgeCore.dll").c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!core) return GetLastError();
 #define IMPORT(fn) auto fn=reinterpret_cast<decltype(&::fn)>(GetProcAddress(core,#fn)); if(!fn) return ERROR_PROC_NOT_FOUND

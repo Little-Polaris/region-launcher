@@ -61,6 +61,7 @@ sealed class Launcher : Form
     readonly Button checkProxy = new() { Text = "检测并修复", AutoSize = true };
     readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
     bool preparing;
+    long preparationId;
     bool exiting, allowClose;
     readonly CancellationTokenSource shutdown = new();
     readonly HashSet<Task> operations = [];
@@ -112,10 +113,10 @@ sealed class Launcher : Form
         AddLabel(grid, "独立代理", 5);
         var proxy = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; proxy.Controls.Add(proxyHost); proxy.Controls.Add(proxyPort);
         checkProxy.Click += async (_, _) => await TrackOperation(async () => {
-            preparing = true; UpdateActions();
+            if (!BeginPreparation(out long operation)) return;
             try { var result = await CheckProxy(); NotifyCheckResult(result.Recovered, result.Detail, null); }
             catch (Exception ex) { Append("代理检测失败：" + ex.Message); NotifyCheckResult(false, "", ex.Message); }
-            finally { preparing = false; UpdateActions(); }
+            finally { EndPreparation(operation); }
         });
         configureProxy.Click += (_, _) => {
             using var dialog = new ProxySettingsDialog(dedicatedProxy);
@@ -234,6 +235,17 @@ sealed class Launcher : Form
         checkProxy.Enabled = !preparing;
         country.Enabled = language.Enabled = timeZone.Enabled = dst.Enabled = start.Enabled;
     }
+    bool BeginPreparation(out long operation)
+    {
+        operation = 0;
+        if (preparing || exiting) return false;
+        operation = ++preparationId; preparing = true; UpdateActions(); return true;
+    }
+    void EndPreparation(long operation)
+    {
+        if (operation == preparationId) preparing = false;
+        UpdateActions();
+    }
     void RefreshSoftware()
     {
         loadingSoftware = true;
@@ -339,7 +351,14 @@ sealed class Launcher : Form
         var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token);
         shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
-        var inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token);
+        ProbeResult[] inside;
+        try { inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token); }
+        catch (IOException) when (!shutdown.IsCancellationRequested) {
+            Append("[故障复核] 环境检测失败，立即复查指定代理的实际联网，不重启代理。");
+            var recheck = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[故障复核] " + s), cancellationToken: shutdown.Token);
+            Append(recheck.Any(r => r.Ok) ? "[故障复核] 指定代理仍有成功响应，需对照环境接管与站点日志；不能据此认定节点完全正常。" : "[故障复核] 指定代理也全部失败，故障涉及代理或其上游链路；本次目标程序未启动。");
+            throw;
+        }
         ProxyHealth.RequireMatchingExit(throughProxy, inside);
         Append($"实际联网及环境出口校验通过：代理 {throughProxy.Count(r => r.Ok)}/{throughProxy.Length}，环境 {inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。同一站点两层出口一致；失败站点见上方日志。");
         Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
@@ -358,10 +377,9 @@ sealed class Launcher : Form
     }
     async Task StartSession()
     {
-        if (preparing || exiting) return;
+        if (!BeginPreparation(out long operation)) return;
         bool join = session != null;
         string applicationName = (software.SelectedItem as LaunchApplication)?.Name ?? "所选程序";
-        preparing = true; UpdateActions();
         try
         {
             if (software.SelectedItem is not LaunchApplication selected) throw new IOException("请先添加并选择要启动的软件。");
@@ -374,6 +392,7 @@ sealed class Launcher : Form
             string dnsAddress = dedicatedProxy.DnsAddress;
             start.Enabled = false; await CheckProxy();
             shutdown.Token.ThrowIfCancellationRequested();
+            if (join && session is not { HasExited: false }) throw new IOException("原运行环境已结束，请重新启动所选程序。");
             var settings = selected.Environment ?? throw new IOException("所选软件缺少地区设置，请重新编辑并保存。");
             settings.Validate();
             var region = WindowsSettings.Regions().Single(r => r.GeoId == settings.GeoId);
@@ -394,32 +413,32 @@ sealed class Launcher : Form
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
             if (join)
             {
-                preparing = false; UpdateActions();
-                using (candidate) { await MonitorLaunch(candidate); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
+                using (candidate) { await MonitorLaunch(candidate, () => EndPreparation(operation)); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
             session = candidate;
-            preparing = false; UpdateActions();
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
-            await MonitorLaunch(session); diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
+            await MonitorLaunch(session, () => EndPreparation(operation)); diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) {
             Append("未启动或运行失败：" + ex.Message);
             if (session is { HasExited: true }) { session.Dispose(); session = null; }
             NotifyLaunchFailure(applicationName);
         }
-        finally { preparing = false; UpdateActions(); }
+        finally { EndPreparation(operation); }
     }
-    async Task MonitorLaunch(Process process) {
-        bool started = false;
+    async Task MonitorLaunch(Process process, Action? onStarted = null) {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task logs = Task.WhenAll(
             ProcessLog.ReadAsync(process.StandardOutput.BaseStream, line => {
-                if (line.StartsWith("STARTED PID=", StringComparison.Ordinal) && uint.TryParse(line[12..], out uint pid) && pid > 0) started = true;
+                if (line.StartsWith("STARTED PID=", StringComparison.Ordinal) && uint.TryParse(line[12..], out uint pid) && pid > 0) started.TrySetResult();
                 Append(line);
             }), ProcessLog.ReadAsync(process.StandardError.BaseStream, Append));
+        await Task.WhenAny(started.Task, logs);
+        if (started.Task.IsCompletedSuccessfully) onStarted?.Invoke();
         await process.WaitForExitAsync(); await logs;
         // Session exit codes also include the application's own exit code; only missing startup is a launch failure.
-        if (!started) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见前面的日志。");
+        if (!started.Task.IsCompletedSuccessfully) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见前面的日志。");
     }
     void NotifyLaunchFailure(string applicationName) {
         if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;

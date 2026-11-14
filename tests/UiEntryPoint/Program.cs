@@ -5,7 +5,7 @@ using System.Text.Json;
 System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException, false);
 
 if (args.Length == 2 && args[0] == "--launch-result") {
-    if (args[1] == "started") Console.WriteLine("STARTED PID=" + Environment.ProcessId);
+    if (args[1].StartsWith("started")) { if (args[1] == "started-delay") Thread.Sleep(150); Console.WriteLine("STARTED PID=" + Environment.ProcessId); if (args[1] == "started-delay") Thread.Sleep(350); }
     else Console.Error.WriteLine("Application was not started: fixture rejection");
     Environment.ExitCode = 17; return;
 }

@@ -4,7 +4,7 @@ using System.Net.Http;
 using System.Text.RegularExpressions;
 
 sealed record ProbeSite(string Name, string Url, bool Trace);
-sealed record ProbeResult(string Name, string Host, bool Ok, long Milliseconds, int? Status, string? Ip, string? Country, string? Error);
+sealed record ProbeResult(string Name, string Host, bool Ok, long Milliseconds, int? Status, string? Ip, string? Country, string? Error, string? Stage = null);
 
 static class ProxyHealth
 {
@@ -18,17 +18,27 @@ static class ProxyHealth
             UseProxy = port.HasValue, Proxy = port.HasValue ? new WebProxy($"socks5://127.0.0.1:{port}") : null,
             AllowAutoRedirect = false, ConnectTimeout = timeout ?? TimeSpan.FromSeconds(15), UseCookies = false
         };
-        using var client = new HttpClient(handler) { Timeout = timeout ?? TimeSpan.FromSeconds(15), MaxResponseContentBufferSize = 65536 };
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         return await Task.WhenAll((sites ?? Sites).Select(async site => {
             var timer = Stopwatch.StartNew(); int? status = null;
+            string stage = "连接/握手/响应头";
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(timeout ?? TimeSpan.FromSeconds(15));
             try {
                 using var request = new HttpRequestMessage(HttpMethod.Get, site.Url);
                 request.Headers.CacheControl = new() { NoCache = true, NoStore = true };
                 request.Headers.UserAgent.ParseAdd("RegionLauncher-Connectivity/1.0");
-                using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
                 status = (int)response.StatusCode;
+                log($"{site.Name}：已收到响应头，HTTP {status}，{timer.ElapsedMilliseconds} ms");
                 if (response.StatusCode != HttpStatusCode.OK) throw new IOException($"HTTP {status}，未收到预期检测内容");
-                string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                stage = "读取响应正文";
+                using var body = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
+                byte[] bytes = new byte[65537]; int length = 0;
+                while (length < bytes.Length) { int read = await body.ReadAsync(bytes.AsMemory(length), deadline.Token).ConfigureAwait(false); if (read == 0) break; length += read; }
+                if (length > 65536) throw new IOException("检测响应超过 64 KiB 上限");
+                stage = "验证响应内容";
+                string text = System.Text.Encoding.UTF8.GetString(bytes, 0, length);
                 string? ip = null, country = null;
                 if (site.Trace) {
                     foreach (string line in text.Split('\n')) {
@@ -42,8 +52,8 @@ static class ProxyHealth
                 return new ProbeResult(site.Name, new Uri(site.Url).Host, true, timer.ElapsedMilliseconds, status, ip, country, null);
             } catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException) {
                 string error = ex is OperationCanceledException ? (cancellationToken.IsCancellationRequested ? "检测已取消" : "请求超时") : ex.Message + (ex.InnerException == null ? "" : "；" + ex.GetBaseException().Message);
-                log($"{site.Name}：失败，{timer.ElapsedMilliseconds} ms，{error}");
-                return new ProbeResult(site.Name, new Uri(site.Url).Host, false, timer.ElapsedMilliseconds, status, null, null, error);
+                log($"{site.Name}：失败，{timer.ElapsedMilliseconds} ms，阶段={stage}，{error}");
+                return new ProbeResult(site.Name, new Uri(site.Url).Host, false, timer.ElapsedMilliseconds, status, null, null, error, stage);
             }
         })).ConfigureAwait(false);
     }
