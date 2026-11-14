@@ -113,8 +113,8 @@ sealed class Launcher : Form
         var proxy = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; proxy.Controls.Add(proxyHost); proxy.Controls.Add(proxyPort);
         checkProxy.Click += async (_, _) => await TrackOperation(async () => {
             preparing = true; UpdateActions();
-            try { await CheckProxy(); }
-            catch (Exception ex) { Append("代理检测失败：" + ex.Message); }
+            try { var result = await CheckProxy(); NotifyCheckResult(result.Recovered, result.Detail, null); }
+            catch (Exception ex) { Append("代理检测失败：" + ex.Message); NotifyCheckResult(false, "", ex.Message); }
             finally { preparing = false; UpdateActions(); }
         });
         configureProxy.Click += (_, _) => {
@@ -330,11 +330,12 @@ sealed class Launcher : Form
         if (log.TextLength > 120000) log.Text = log.Text[^60000..];
         log.AppendText(line + Environment.NewLine);
     }
-    async Task CheckProxy()
+    async Task<(bool Recovered, string Detail)> CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
         Append("开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。端口残留时会结束确证持有旧监听引用的进程，请先保存工作。");
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
+        bool exitedCore = dedicatedProxy.HasExitedCore;
         var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token);
         shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
@@ -342,6 +343,18 @@ sealed class Launcher : Form
         ProxyHealth.RequireMatchingExit(throughProxy, inside);
         Append($"实际联网及环境出口校验通过：代理 {throughProxy.Count(r => r.Ok)}/{throughProxy.Length}，环境 {inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。同一站点两层出口一致；失败站点见上方日志。");
         Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
+        string detail = $"实际联网及环境出口校验通过。\n代理检测：{throughProxy.Count(r => r.Ok)}/{throughProxy.Length} 个站点成功。\n环境检测：{inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。";
+        if (throughProxy.Any(r => !r.Ok) || inside.Any(r => !r.Ok)) detail += "\n部分检测站点未通过，请查看日志了解详情。";
+        return (exitedCore || proxyRecovery.Recovered, detail);
+    }
+    void NotifyCheckResult(bool recovered, string detail, string? error)
+    {
+        if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
+        string title = error != null ? "检测并修复：未能恢复连接" : recovered ? "检测并修复：连接已恢复" : "检测并修复：连接正常";
+        string message = error != null ? "本次检测或修复未通过。\n\n" + error + "\n\n请点击“打开日志”查看详情。" : detail;
+        Append(title);
+        RestoreWindow();
+        MessageBox.Show(this, message, title, MessageBoxButtons.OK, error != null ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
     }
     async Task StartSession()
     {

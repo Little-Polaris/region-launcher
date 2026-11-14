@@ -17,10 +17,12 @@ static class LaunchFailureTests
         var type = form.GetType();
         var tray = (NotifyIcon)type.GetField("tray", Hidden)!.GetValue(form)!;
         int dialogs = 0;
+        List<string> checkDialogs = [];
         using var timer = new System.Windows.Forms.Timer { Interval = 50 };
         timer.Tick += (_, _) => EnumThreadWindows(GetCurrentThreadId(), (window, _) => {
             var title = new StringBuilder(128); GetWindowText(window, title, title.Capacity);
             if (title.ToString() == "启动失败") { dialogs++; PostMessage(window, 0x0010, 0, 0); }
+            if (title.ToString().StartsWith("检测并修复：")) { checkDialogs.Add(title.ToString()); PostMessage(window, 0x0010, 0, 0); }
             return true;
         }, 0);
         timer.Start();
@@ -58,6 +60,21 @@ static class LaunchFailureTests
         Check(tray.BalloonTipText == previous, "Intentional exit generated a failure notification");
         type.GetField("exiting", Hidden)!.SetValue(form, false);
         type.GetMethod("RestoreWindow", Hidden)!.Invoke(form, null);
+        timer.Start();
+        var notifyCheck = type.GetMethod("NotifyCheckResult", Hidden)!;
+        foreach (int mode in new[] { 0, 1, 2 }) {
+            if (mode == 1) form.Hide();
+            if (mode == 2) form.WindowState = FormWindowState.Minimized;
+            notifyCheck.Invoke(form, new object[] { mode == 1, "实际联网及环境出口校验通过。", mode == 2 ? "测试节点不可用" : null });
+            Check(form.Visible && form.WindowState != FormWindowState.Minimized, "Check result did not restore launcher");
+        }
+        Check(checkDialogs.SequenceEqual(new[] { "检测并修复：连接正常", "检测并修复：连接已恢复", "检测并修复：未能恢复连接" }), "Missing or duplicate check result dialogs");
+        type.GetField("exiting", Hidden)!.SetValue(form, true);
+        notifyCheck.Invoke(form, new object[] { false, "", "退出期间" });
+        Check(checkDialogs.Count == 3, "Exit generated a check result dialog");
+        type.GetField("exiting", Hidden)!.SetValue(form, false);
+        timer.Stop();
+        Console.WriteLine("PASS: healthy/recovered/failed result dialogs, hidden/minimized restoration, one dialog per result and exit suppression");
         Console.WriteLine("PASS: helper failure classification, real visible error dialog, hidden/minimized notification request, click restore, intentional-exit suppression");
     }
     delegate bool EnumWindow(nint window, nint parameter);

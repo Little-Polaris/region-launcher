@@ -15,6 +15,7 @@ static class RecoveryTests
             try { await recovery.CheckAsync(default); Check(!fails, name + " accepted failed internet"); }
             catch (IOException) when (fails) { }
             Check(probes == rounds.Length && restarts == expectedRestarts, name + " wrong recovery count");
+            Check(recovery.Recovered == (!fails && rounds.Length > 1), name + " wrong recovery outcome");
         }
         await Case("healthy", [[good]], 0);
         await Case("one target unavailable", [[bad, good]], 0);
@@ -48,6 +49,7 @@ static class RecoveryTests
             }, _ => {}, retryDelay: TimeSpan.Zero);
         await Task.WhenAll(serial.CheckAsync(default), serial.CheckAsync(default));
         Check(concurrentRestarts == 1, "Concurrent requests restart twice");
+        Check(!serial.Recovered, "Healthy follow-up retained previous recovery outcome");
 
         // A successful SOCKS CONNECT with no HTTP payload must trigger recovery.
         using var direct = new TcpListener(IPAddress.Loopback, 0); direct.Start();

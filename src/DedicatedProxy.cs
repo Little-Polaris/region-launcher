@@ -26,6 +26,7 @@ sealed class DedicatedProxy : IDisposable
     ProxyPorts? ports;
     volatile bool stopping;
     public bool CleanupComplete => process == null && ports == null;
+    public bool HasExitedCore => process is { HasExited: true };
     readonly SemaphoreSlim gate = new(1);
     public bool Configured => File.Exists(config);
     public event Action? UnexpectedExit;
