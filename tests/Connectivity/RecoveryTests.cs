@@ -12,7 +12,7 @@ static class RecoveryTests
             var recovery = new ProxyRecovery(_ => { starts++; return Task.CompletedTask; },
                 _ => { restarts++; return Task.CompletedTask; },
                 _ => Task.FromResult(rounds[probes++]), _ => {}, retryDelay: TimeSpan.Zero);
-            try { await recovery.CheckAsync(default, restartOnProbeFailure: !failover); Check(!fails, name + " accepted failed internet"); }
+            try { await recovery.CheckAsync(default, reconnectOnProbeFailure: !failover); Check(!fails, name + " accepted failed internet"); }
             catch (IOException) when (fails) { }
             Check(probes == rounds.Length && restarts == expectedRestarts, name + " wrong recovery count");
             Check(starts == 1, name + " did not ensure local core was started");

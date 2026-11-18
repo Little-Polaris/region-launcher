@@ -21,23 +21,24 @@ static class ProxyOwnershipTests
             if (owned.HasExited || outside.HasExited) throw new Exception("Healthy ownership check stopped a process");
             using (var canceled = new CancellationTokenSource()) {
                 canceled.Cancel();
-                try { await proxy.RestartAsync(canceled.Token); throw new Exception("Canceled restart accepted"); } catch (OperationCanceledException) { }
-                if (owned.HasExited) throw new Exception("Canceled restart killed its core");
+                try { await proxy.ReconnectAsync(canceled.Token); throw new Exception("Canceled reconnect accepted"); } catch (OperationCanceledException) { }
+                if (owned.HasExited) throw new Exception("Canceled reconnect killed its core");
             }
             File.AppendAllText(config, " ");
-            try { await proxy.RestartAsync(); throw new Exception("Configuration changed during recovery"); } catch (IOException) { }
+            try { await proxy.ReconnectAsync(default); throw new Exception("Configuration changed during recovery"); } catch (IOException) { }
             if (owned.HasExited) throw new Exception("Configuration rejection stopped the original core");
             File.WriteAllBytes(config, original);
             // Occupied DNS must refuse a replacement, never adopt/kill the port's owner.
             try { reservation.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.153"), 53)); }
             catch (SocketException) { reservation.Dispose(); reservation = null; }
-            int ownedPid = owned.Id;
-            try { await proxy.RestartAsync(); throw new Exception("Occupied DNS was accepted"); } catch (IOException) { }
-            try { using var leftover = Process.GetProcessById(ownedPid); if (!leftover.HasExited) throw new Exception("Owned core survived restart"); }
-            catch (ArgumentException) { }
+            try { await proxy.ReconnectAsync(default); throw new Exception("Missing controller accepted"); } catch (IOException) { }
+            if (owned.HasExited) throw new Exception("Reconnect without a controller stopped the core");
+            owned.Kill();
+            await owned.WaitForExitAsync();
+            try { await proxy.EnsureStarted(); throw new Exception("Occupied DNS was accepted"); } catch (IOException) { }
             if (outside.HasExited) throw new Exception("Recovery stopped an outside process");
             if (reservation != null && !reservation.IsBound) throw new Exception("Recovery released someone else's listener");
-            Console.WriteLine("PASS: owned process lifecycle, canceled restart, configuration pinning, occupied-listener refusal and outside process survival");
+            Console.WriteLine("PASS: reconnect preserves the active core; configuration pinning, canceled reconnect, occupied-listener refusal and outside process survival");
         } finally {
             reservation?.Dispose(); File.WriteAllBytes(config, original);
             proxy.Dispose();

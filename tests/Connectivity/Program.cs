@@ -11,6 +11,11 @@ if (args.Length == 1 && args[0] == "--hold") { await Task.Delay(60000); return; 
 if (args.Length == 2 && args[0] == "--recovery-child") { await RecoveryLive.Child(args[1]); return; }
 
 string folder = Path.GetFullPath(args[0]); Directory.CreateDirectory(folder);
+if (args.Length == 3 && args[1] == "--switch")
+{
+    await RuntimeExitTests.Run(Path.GetFullPath(args[2]), folder);
+    return;
+}
 if (args.Length >= 4 && args[1] == "--recovery-live") {
     await RecoveryLive.Run(folder, Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); return;
 }

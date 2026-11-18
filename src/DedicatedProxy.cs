@@ -24,12 +24,14 @@ sealed class DedicatedProxy : IDisposable
     public string EnginePath => Path.Combine(bin, "proxy", "mihomo.exe");
     Process? process;
     ProxyPorts? ports;
+    ProxyRuntimeExit? runtimeExit;
+    JsonObject? selectedNode;
     volatile bool stopping;
     public bool CleanupComplete => process == null && ports == null;
     public bool HasExitedCore => process is { HasExited: true };
     readonly SemaphoreSlim gate = new(1);
     public bool Configured => File.Exists(config);
-    public bool UsesFailover => ProxyConfiguration.IsFailover(ProxyConfiguration.ReadNode(File.ReadAllText(config), out _));
+    public bool UsesFailover => selectedNode == null && ProxyConfiguration.IsFailover(ProxyConfiguration.ReadNode(File.ReadAllText(config), out _));
     public event Action? UnexpectedExit;
     public int Port { get { using var json = JsonDocument.Parse(File.ReadAllText(config)); return json.RootElement.GetProperty("mixed-port").GetInt32(); } }
     public string DnsAddress {
@@ -41,10 +43,67 @@ sealed class DedicatedProxy : IDisposable
         }
     }
 
-    public Task EnsureStarted(CancellationToken cancellationToken = default) => StartCore(false, cancellationToken);
-    public Task RestartAsync(CancellationToken cancellationToken = default) => StartCore(true, cancellationToken);
+    public async Task ReconnectAsync(CancellationToken token)
+    {
+        await EnsureStarted(token).ConfigureAwait(false);
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var exit = runtimeExit ?? throw new IOException("独立代理内核未就绪。");
+            if (exit.HasAutomatic && selectedNode == null) return;
+            exit.WriteNode(selectedNode);
+            await exit.RefreshNodeAsync(token).ConfigureAwait(false);
+            await exit.CloseConnectionsAsync(token).ConfigureAwait(false);
+            log("[代理修复] 已在现有内核中重连当前节点。");
+        }
+        finally { gate.Release(); }
+    }
 
-    async Task StartCore(bool restart, CancellationToken cancellationToken)
+    public async Task SwitchNodeAsync(JsonObject? node, CancellationToken token)
+    {
+        if (node != null && ProxyConfiguration.IsFailover(node))
+            throw new IOException("请选择一个固定节点，或恢复已配置的自动组。");
+        JsonObject? selection = node == null ? null :
+            (JsonObject)ProxyConfiguration.Build(node, Port)["proxies"]![0]!.DeepClone();
+        await EnsureStarted(token).ConfigureAwait(false);
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var exit = runtimeExit ?? throw new IOException("独立代理内核未就绪。");
+            if (selection == null && !exit.HasAutomatic) throw new IOException("当前配置没有自动故障切换组。");
+            if (selection == null && selectedNode == null) return;
+            try
+            {
+                if (selection != null)
+                {
+                    Register(selection);
+                    exit.WriteNode(selection);
+                    await exit.RefreshNodeAsync(token).ConfigureAwait(false);
+                }
+                await exit.SelectAsync(selection == null, token).ConfigureAwait(false);
+            }
+            catch (Exception) when (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    if (selection != null)
+                    {
+                        exit.WriteNode(selectedNode);
+                        await exit.RefreshNodeAsync(token).ConfigureAwait(false);
+                    }
+                    await exit.SelectAsync(exit.HasAutomatic && selectedNode == null, token).ConfigureAwait(false);
+                }
+                catch (Exception) { throw new IOException("切换失败，未能确认代理出口是否恢复，请重新选择节点。"); }
+                throw;
+            }
+            selectedNode = selection;
+            try { await exit.CloseConnectionsAsync(token).ConfigureAwait(false); }
+            catch (IOException ex) { log("[切换节点] 出口已切换，旧连接清理失败：" + ex.Message); }
+        }
+        finally { gate.Release(); }
+    }
+
+    public async Task EnsureStarted(CancellationToken cancellationToken = default)
     {
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         bool starting = false;
@@ -55,10 +114,7 @@ sealed class DedicatedProxy : IDisposable
             // A recovery must keep the same exit configuration for the existing session.
             if (fingerprint != null && hash != fingerprint)
                 throw new IOException("代理配置在运行期间发生变化，请恢复原配置，或退出环境后重新配置。");
-            if (process is { HasExited: false }) {
-                if (!restart) return;
-                log($"[代理修复] 重启本启动器持有的内核 PID={process.Id}，运行时长={(DateTime.Now - process.StartTime).TotalSeconds:F0} 秒，内存={process.WorkingSet64 / 1048576} MiB，句柄={process.HandleCount}；保持节点、代理端口和 DNS 不变。");
-            }
+            if (process is { HasExited: false }) return;
             cancellationToken.ThrowIfCancellationRequested();
             if (!await Task.Run(() => StopCore(true), cancellationToken).ConfigureAwait(false))
                 throw new IOException("旧代理或端口尚未释放，已取消启动替代内核。请查看端口回收日志。");
@@ -67,8 +123,10 @@ sealed class DedicatedProxy : IDisposable
             var requestedPorts = new ProxyPorts(Port, dnsIp);
             requestedPorts.RequireAvailable(log);
             var runtime = JsonNode.Parse(File.ReadAllText(config))!.AsObject();
-            Register(runtime);
             ProxyConfiguration.PrepareRuntime(runtime);
+            runtimeExit = new ProxyRuntimeExit(runtime, Path.GetDirectoryName(config)!);
+            runtimeExit.WriteNode(selectedNode);
+            Register(runtime);
             runtimeConfig = Path.Combine(Path.GetDirectoryName(config)!, $"runtime-{Environment.ProcessId}.json");
             await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString(), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
@@ -86,18 +144,29 @@ sealed class DedicatedProxy : IDisposable
             fingerprint = hash;
             output = Task.WhenAll(ReadOutput(candidate.StandardOutput.BaseStream), ReadOutput(candidate.StandardError.BaseStream));
             log($"独立代理内核已启动，PID={candidate.Id}，SOCKS5=127.0.0.1:{Port}，DNS={DnsAddress}:53，规则=MATCH,RegionExit");
-            for (int i = 0; i < 50; i++)
+            using var readiness = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            readiness.CancelAfter(TimeSpan.FromSeconds(6));
+            var readyToken = readiness.Token;
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (candidate.HasExited) throw new IOException("独立代理内核启动失败，请检查节点配置。");
-                using var socket = new TcpClient();
-                try {
-                    await socket.ConnectAsync(IPAddress.Loopback, Port, cancellationToken).ConfigureAwait(false);
-                    using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53, cancellationToken).ConfigureAwait(false); return;
+                while (true)
+                {
+                    readyToken.ThrowIfCancellationRequested();
+                    if (candidate.HasExited) throw new IOException("独立代理内核启动失败，请检查节点配置。");
+                    using var socket = new TcpClient();
+                    try
+                    {
+                        await socket.ConnectAsync(IPAddress.Loopback, Port, readyToken).ConfigureAwait(false);
+                        using var dns = new TcpClient(); await dns.ConnectAsync(dnsIp, 53, readyToken).ConfigureAwait(false);
+                        await runtimeExit.SelectAsync(runtimeExit.HasAutomatic && selectedNode == null, readyToken).ConfigureAwait(false);
+                        return;
+                    }
+                    catch (Exception ex) when (ex is SocketException or IOException)
+                    { await Task.Delay(100, readyToken).ConfigureAwait(false); }
                 }
-                catch (SocketException) { await Task.Delay(100, cancellationToken).ConfigureAwait(false); }
             }
-            throw new IOException("独立代理内核未就绪，程序没有启动。");
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            { throw new IOException("独立代理内核或控制接口未就绪，程序没有启动。"); }
         }
         catch { if (starting) StopCore(); throw; }
         finally { gate.Release(); }
@@ -121,7 +190,7 @@ sealed class DedicatedProxy : IDisposable
     public void Dispose()
     {
         gate.Wait();
-        try { if (StopCore()) fingerprint = null; }
+        try { if (StopCore()) { fingerprint = null; selectedNode = null; } }
         finally { gate.Release(); }
     }
     public async Task<bool> StopAsync()
@@ -163,6 +232,12 @@ sealed class DedicatedProxy : IDisposable
         }
         // Keep the original process identity until the old endpoints have gone; a port-table PID is not ownership.
         if (released) { old?.Dispose(); process = null; ports = null; }
+        if (runtimeExit != null)
+        {
+            try { runtimeExit.Dispose(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log("[代理退出] 临时节点配置清理失败：" + ex.Message); }
+            runtimeExit = null;
+        }
         if (runtimeConfig != null) {
             try { File.Delete(runtimeConfig); runtimeConfig = null; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log("[代理退出] 临时配置清理失败：" + ex.Message); }

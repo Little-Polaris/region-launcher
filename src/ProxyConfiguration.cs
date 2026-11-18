@@ -16,6 +16,9 @@ static class ProxyConfiguration
         string text = File.ReadAllText(path);
         var actual = JsonNode.Parse(text)!.AsObject();
         var expected = Build(ReadNode(text, out int port), port);
+        if (actual.Any(entry => entry.Key.StartsWith("external-controller-", StringComparison.OrdinalIgnoreCase) ||
+            entry.Key is "external-ui" or "external-ui-url" or "external-doh-server" or "proxy-providers" or "secret"))
+            throw new IOException("控制接口与节点来源由启动器管理，请重新校验并保存配置。");
         if (expected["proxy-groups"] != null && !JsonNode.DeepEquals(actual, expected))
             throw new IOException("自动故障切换配置不符合要求，请重新校验并保存。");
         foreach (string key in new[] { "mode", "rules", "tun", "external-controller", "bind-address", "allow-lan", "ipv6" })

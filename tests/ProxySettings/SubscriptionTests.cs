@@ -62,6 +62,13 @@ static class SubscriptionTests
         Assert(resolvers.SequenceEqual(["https://1.1.1.1/dns-query#RegionExit", "https://8.8.8.8/dns-query#RegionExit"]), "Failover DoH changed proxy routing");
         Assert(failover["dns"]!["nameserver"]!.AsArray().Count == 1, "Saved config was changed");
         await ProxyConfiguration.ValidateAndSave(runtime, Path.Combine(folder, "failover-runtime.json"), engine, true);
+        using (var exit = new ProxyRuntimeExit(runtime, folder))
+        {
+            exit.WriteNode(null);
+            await ProxyConfiguration.ValidateAndSave(runtime, Path.Combine(folder, "switchable-auto.json"), engine, false);
+            Assert(runtime["rules"]![0]!.GetValue<string>() == "MATCH,RegionExit", "Hot switch changed the protected route");
+            Assert(runtime["dns"]!["nameserver"]!.AsArray().Count == resolvers.Length, "Hot switch removed DNS redundancy");
+        }
         var fixedRuntime = (JsonObject)protectedConfig.DeepClone();
         ProxyConfiguration.PrepareRuntime(fixedRuntime);
         Assert(fixedRuntime["dns"]!["nameserver"]!.AsArray().Count == 1, "Fixed-node configuration changed");

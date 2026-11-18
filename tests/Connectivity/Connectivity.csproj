@@ -7,6 +7,7 @@
     <Compile Include="../../src/EnvironmentCheck.cs" Link="EnvironmentCheck.cs" />
     <Compile Include="../../src/ProxyConfiguration.cs" Link="ProxyConfiguration.cs" />
     <Compile Include="../../src/DedicatedProxy.cs" Link="DedicatedProxy.cs" />
+    <Compile Include="../../src/ProxyRuntimeExit.cs" Link="ProxyRuntimeExit.cs" />
     <Compile Include="../../src/ProxyPorts.cs" Link="ProxyPorts.cs" />
     <Compile Include="../../src/ListenerRecovery.cs" Link="ListenerRecovery.cs" />
     <Compile Include="../../src/ProcessLog.cs" Link="ProcessLog.cs" />
