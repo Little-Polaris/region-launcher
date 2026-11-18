@@ -193,7 +193,7 @@ sealed class Launcher : Form
         proxyHost.Text = "127.0.0.1"; proxyHost.ReadOnly = true; proxyHost.Enabled = proxyPort.Enabled = false;
         try {
             proxyPort.Value = dedicatedProxy.Configured ? dedicatedProxy.Port : 17890;
-            Append(dedicatedProxy.Configured ? "已加载独立代理配置；公网使用固定节点，局域网直连，DNS 使用专用解析器。" : "请点击“独立代理配置”填写或导入节点。");
+            Append(dedicatedProxy.Configured ? "已加载独立代理配置；公网走所选出口，局域网直连，DNS 使用专用解析器。" : "请点击“独立代理配置”填写节点或导入配置。");
         }
         catch { Append("独立代理配置无法读取，请点击“独立代理配置”修正。"); }
         UpdateActions();
@@ -345,10 +345,13 @@ sealed class Launcher : Form
     async Task<(bool Recovered, string Detail)> CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
-        Append("开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。端口残留时会结束确证持有旧监听引用的进程，请先保存工作。");
+        bool failover = dedicatedProxy.UsesFailover;
+        Append(failover
+            ? "开始检测：Mihomo 负责节点探活与切换。启动器检查本地代理和环境内实际联网。"
+            : "开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。");
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
         bool exitedCore = dedicatedProxy.HasExitedCore;
-        var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token);
+        var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token, restartOnProbeFailure: !failover);
         shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
         ProbeResult[] inside;
@@ -359,7 +362,13 @@ sealed class Launcher : Form
             Append(recheck.Any(r => r.Ok) ? "[故障复核] 指定代理仍有成功响应，需对照环境接管与站点日志；不能据此认定节点完全正常。" : "[故障复核] 指定代理也全部失败，故障涉及代理或其上游链路；本次目标程序未启动。");
             throw;
         }
-        ProxyHealth.RequireMatchingExit(throughProxy, inside);
+        try { ProxyHealth.RequireMatchingExit(throughProxy, inside); }
+        catch (IOException) when (failover && !shutdown.IsCancellationRequested)
+        {
+            Append("[出口复核] 检测期间可能发生节点切换，重新核对独立代理出口。");
+            throughProxy = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, Append, cancellationToken: shutdown.Token);
+            ProxyHealth.RequireMatchingExit(throughProxy, inside);
+        }
         Append($"实际联网及环境出口校验通过：代理 {throughProxy.Count(r => r.Ok)}/{throughProxy.Length}，环境 {inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。同一站点两层出口一致；失败站点见上方日志。");
         Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
         string detail = $"实际联网及环境出口校验通过。\n代理检测：{throughProxy.Count(r => r.Ok)}/{throughProxy.Length} 个站点成功。\n环境检测：{inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。";

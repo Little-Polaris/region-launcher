@@ -42,6 +42,31 @@ static class SubscriptionTests
         Assert(result.Nodes[1].Node["ws-opts"]!["headers"]!["Host"]!.GetValue<string>() == "example.com", "Nested options lost");
         var protectedConfig = ProxyConfiguration.Build(result.Nodes[0].Node, 17890);
         Assert(protectedConfig["rules"]![0]!.GetValue<string>() == "MATCH,RegionExit" && !protectedConfig["tun"]!["enable"]!.GetValue<bool>(), "Subscription changed host routing");
+        var grouped = Subscription.Parse(yaml + "\n" + """
+        proxy-groups:
+          - {name: US Auto, type: fallback, proxies: [US 二号, US 一号], url: http://example.invalid}
+          - {name: Direct fallback, type: fallback, proxies: [US 一号, DIRECT]}
+          - {name: Nested fallback, type: fallback, proxies: [US 一号, US Auto]}
+          - {name: Unsupported member, type: fallback, proxies: [US 一号, unsupported]}
+          - {name: Provider fallback, type: fallback, proxies: [US 一号, US 二号], use: [provider]}
+        """);
+        Assert(grouped.Nodes.Count == 3 && grouped.Skipped == 5, "Unexpected failover group eligibility");
+        var importedGroup = grouped.Nodes.Single(n => n.Name == "US Auto");
+        var failover = ProxyConfiguration.Build(importedGroup.Node, 17911);
+        var groupPath = Path.Combine(folder, "failover-check.json");
+        await ProxyConfiguration.ValidateAndSave(failover, groupPath, engine, true);
+        ProxyConfiguration.ValidateRuntimePolicy(groupPath);
+        var savedGroup = ProxyConfiguration.ReadNode(File.ReadAllText(groupPath), out int port);
+        Assert(port == 17911 && JsonNode.DeepEquals(failover, ProxyConfiguration.Build(savedGroup, port)), "Group round-trip or local port changed");
+        Assert(failover["proxies"]![0]!["server"]!.GetValue<string>() == "192.0.2.2", "Import order lost");
+        Assert(failover["proxy-groups"]![0]!["proxies"]![0]!.GetValue<string>() == "RegionMember1", "Group order lost");
+        Assert(!failover.ToJsonString().Contains("example.invalid"), "Subscription health check leaked into runtime policy");
+        var invalidGroup = (JsonObject)failover.DeepClone();
+        invalidGroup["proxy-groups"]![0]!["proxies"]![0] = "DIRECT";
+        string invalidPath = Path.Combine(folder, "failover-rejected.json");
+        File.WriteAllText(invalidPath, invalidGroup.ToJsonString());
+        await Reject(() => Task.Run(() => ProxyConfiguration.ValidateRuntimePolicy(invalidPath)), "direct fallback in runtime");
+        Console.WriteLine("PASS: US Auto order, live Mihomo config validation, and rejection of unsafe or unsupported group members");
         string id = "78ac0fdc-9041-4b28-9c55-167886f88751";
         var vmess = new JsonObject { ["v"]="2", ["ps"]="VMess 测试", ["add"]="192.0.2.1", ["port"]="443", ["id"]=id, ["aid"]="0", ["scy"]="auto", ["net"]="ws", ["type"]="none", ["host"]="example.com", ["path"]="/ws", ["tls"]="tls", ["sni"]="example.com" };
         string links = string.Join('\n',
@@ -90,6 +115,8 @@ static class SubscriptionTests
         proxies:
           - {name: US first, type: hysteria2, server: 192.0.2.1, port: 443, password: fixture}
           - {name: JP second, type: trojan, server: 192.0.2.2, port: 443, password: fixture}
+        proxy-groups:
+          - {name: US Auto, type: fallback, proxies: [US first, JP second]}
         """);
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
         using (var form = new SubscriptionDialog(folder))
@@ -97,13 +124,22 @@ static class SubscriptionTests
             form.SetNodes(nodes);
             var filter = (TextBox)typeof(SubscriptionDialog).GetField("filter", flags)!.GetValue(form)!;
             var list = (ListBox)typeof(SubscriptionDialog).GetField("nodes", flags)!.GetValue(form)!;
-            filter.Text = "JP"; Assert(list.Items.Count == 1, "Search result"); list.SelectedIndex = 0;
+            filter.Text = "Auto"; Assert(list.Items.Count == 1, "Group search result"); list.SelectedIndex = 0;
             typeof(SubscriptionDialog).GetMethod("Choose", flags)!.Invoke(form, null);
-            Assert(form.SelectedNode!["server"]!.GetValue<string>() == "192.0.2.2", "Selected wrong node");
+            var config = ProxyConfiguration.Build(form.SelectedNode!, 17911);
+            using var proxy = new DedicatedProxy(configPath: Path.Combine(folder, "nonexistent.json"));
+            using var settings = new ProxySettingsDialog(proxy);
+            settings.LoadText(config.ToJsonString());
+            Assert(JsonNode.DeepEquals(settings.ReadConfig(), config), "Settings cannot show or save the group");
+            var protocol = (ComboBox)typeof(ProxySettingsDialog).GetField("protocol", flags)!.GetValue(settings)!;
+            Assert(protocol.SelectedItem!.ToString()!.Contains("US Auto"), "Missing group name in settings");
+            protocol.SelectedIndex = 0;
+            settings.LoadText(ProxyConfiguration.Build(nodes.Nodes[0].Node, 17911).ToJsonString());
+            Assert(settings.ReadConfig()["proxy-groups"] == null, "Cannot return to a single node");
         }
         using var reopened = new SubscriptionDialog(folder);
         var savedList = (ListBox)typeof(SubscriptionDialog).GetField("nodes", flags)!.GetValue(reopened)!;
-        Assert(savedList.Items.Count == 2 && ((SubscriptionNode)savedList.SelectedItem!).Name == "JP second", "Cache selection not restored");
+        Assert(savedList.Items.Count == 3 && ((SubscriptionNode)savedList.SelectedItem!).Name == "US Auto", "Group cache selection not restored");
         reopened.StartPosition = FormStartPosition.Manual; reopened.Location = new(-32000, -32000); reopened.ShowInTaskbar = false;
         reopened.Show(); Application.DoEvents();
         using var bitmap = new Bitmap(reopened.Width, reopened.Height);

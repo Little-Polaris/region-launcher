@@ -9,7 +9,7 @@ sealed class SubscriptionDialog : Form
     readonly TextBox filter = new() { AccessibleName = "筛选节点", Dock = DockStyle.Fill, PlaceholderText = "筛选节点名称或协议，例如：美国、US、hysteria2" };
     readonly ListBox nodes = new() { AccessibleName = "订阅节点列表", Dock = DockStyle.Fill, HorizontalScrollbar = true, IntegralHeight = false };
     readonly Label status = new() { AutoSize = true, MaximumSize = new(650, 0), Dock = DockStyle.Fill };
-    readonly Button use = new() { Text = "使用所选节点", AutoSize = true, Enabled = false };
+    readonly Button use = new() { Text = "使用所选项", AutoSize = true, Enabled = false };
     readonly string cachePath;
     List<SubscriptionNode> all = [];
     CancellationTokenSource? download;
@@ -25,7 +25,7 @@ sealed class SubscriptionDialog : Form
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), ColumnCount = 1, RowCount = 7 };
         for (int i = 0; i < 4; i++) grid.RowStyles.Add(new(SizeType.AutoSize));
         grid.RowStyles.Add(new(SizeType.Percent, 100)); grid.RowStyles.Add(new(SizeType.AutoSize)); grid.RowStyles.Add(new(SizeType.AutoSize));
-        grid.Controls.Add(new Label { Text = "粘贴订阅链接后获取节点，选择一个作为环境的固定出口。\n再次打开可切换已保存的节点；更新订阅需要点击“获取 / 更新节点”。", AutoSize = true, Padding = new(0, 0, 0, 12) }, 0, 0);
+        grid.Controls.Add(new Label { Text = "选择固定节点，或选择配置中的自动故障切换组。组内顺序沿用导入配置。\n再次打开可使用本机缓存；更新订阅请点击“获取 / 更新节点”。", AutoSize = true, Padding = new(0, 0, 0, 12) }, 0, 0);
         grid.Controls.Add(address, 0, 1);
         var downloadBar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         downloadBar.Controls.AddRange([viaProxy, fetch]); grid.Controls.Add(downloadBar, 0, 2);
@@ -47,10 +47,10 @@ sealed class SubscriptionDialog : Form
                 var cache = JsonNode.Parse(File.ReadAllText(cachePath))!.AsObject();
                 address.Text = loadedAddress = cache["url"]?.GetValue<string>() ?? "";
                 viaProxy.Checked = loadedViaProxy = cache["viaProxy"]?.GetValue<bool>() ?? true;
-                SetNodes(Subscription.Parse(cache["nodes"]!.ToJsonString()));
+                SetNodes(Subscription.Parse(cache["nodes"]!.ToJsonString(), cached: true));
                 int selected = cache["selected"]?.GetValue<int>() ?? -1;
                 if (selected >= 0 && selected < all.Count) nodes.SelectedItem = all[selected];
-                status.Text = $"已载入本机保存的 {all.Count} 个节点；未自动访问订阅。";
+                status.Text = $"已从本机缓存载入 {all.Count} 个可选项。";
             }
         }
         catch { status.Text = "已有订阅缓存无法读取，请重新获取。当前代理配置未修改。"; }
@@ -59,7 +59,7 @@ sealed class SubscriptionDialog : Form
     internal void SetNodes(SubscriptionResult result)
     {
         all = result.Nodes; filter.Clear(); Filter();
-        status.Text = $"已解析 {all.Count} 个可选节点，跳过 {result.Skipped} 个不支持或无效项。请选择节点；保存前仍会由内核校验。";
+        status.Text = $"已解析 {all.Count} 个可选项，跳过 {result.Skipped} 个不支持或无效项。保存前会由内核校验。";
     }
     void Filter()
     {

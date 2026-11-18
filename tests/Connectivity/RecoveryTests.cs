@@ -7,14 +7,15 @@ static class RecoveryTests
     {
         var bad = good with { Ok = false, Ip = null, Error = "timeout" };
         void Check(bool ok, string error) { if (!ok) throw new Exception(error); }
-        async Task Case(string name, ProbeResult[][] rounds, int expectedRestarts, bool fails = false) {
-            int probes = 0, restarts = 0;
-            var recovery = new ProxyRecovery(_ => Task.CompletedTask,
+        async Task Case(string name, ProbeResult[][] rounds, int expectedRestarts, bool fails = false, bool failover = false) {
+            int probes = 0, restarts = 0, starts = 0;
+            var recovery = new ProxyRecovery(_ => { starts++; return Task.CompletedTask; },
                 _ => { restarts++; return Task.CompletedTask; },
                 _ => Task.FromResult(rounds[probes++]), _ => {}, retryDelay: TimeSpan.Zero);
-            try { await recovery.CheckAsync(default); Check(!fails, name + " accepted failed internet"); }
+            try { await recovery.CheckAsync(default, restartOnProbeFailure: !failover); Check(!fails, name + " accepted failed internet"); }
             catch (IOException) when (fails) { }
             Check(probes == rounds.Length && restarts == expectedRestarts, name + " wrong recovery count");
+            Check(starts == 1, name + " did not ensure local core was started");
             Check(recovery.Recovered == (!fails && rounds.Length > 1), name + " wrong recovery outcome");
         }
         await Case("healthy", [[good]], 0);
@@ -22,6 +23,8 @@ static class RecoveryTests
         await Case("transient failure", [[bad], [good]], 0);
         await Case("recovered", [[bad], [bad], [good]], 1);
         await Case("node remains unavailable", [[bad], [bad], [bad]], 1, true);
+        await Case("failover restores connectivity", [[bad], [good]], 0, failover: true);
+        await Case("failover still unavailable", [[bad], [bad]], 0, fails: true, failover: true);
 
         int restarts = 0, probes = 0;
         var clock = new TestClock();

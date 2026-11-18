@@ -7,21 +7,25 @@ using YamlDotNet.RepresentationModel;
 
 sealed record SubscriptionNode(string Name, JsonObject Node)
 {
-    public override string ToString() => $"{Name}  [{Node["type"]}]";
+    public override string ToString() => ProxyConfiguration.IsFailover(Node)
+        ? $"{Name}  [自动故障切换 · {Node["members"]!.AsArray().Count} 个节点]"
+        : $"{Name}  [{Node["type"]}]";
 }
 sealed record SubscriptionResult(List<SubscriptionNode> Nodes, int Skipped);
 
 static class Subscription
 {
     public const int MaxBytes = 4 * 1024 * 1024;
-    public static SubscriptionResult Parse(string text)
+    public static SubscriptionResult Parse(string text, bool cached = false)
     {
-        if (Encoding.UTF8.GetByteCount(text) > MaxBytes) throw new IOException("订阅超过 4 MB，请使用节点订阅而非大型规则配置。");
+        if (Encoding.UTF8.GetByteCount(text) > (cached ? 12 * 1024 * 1024 : MaxBytes))
+            throw new IOException("订阅内容超过大小限制，请使用节点订阅而非大型规则配置。");
         text = text.Trim().TrimStart('\uFEFF');
         if (text.Length == 0) throw new IOException("订阅内容为空。");
         if (!text.Contains("://") && !text.Contains(':') && !text.StartsWith('{') && !text.StartsWith('['))
             try { text = Decode64(text); } catch { throw new IOException("无法识别订阅格式，请使用 Clash/Mihomo 订阅链接。"); }
         var candidates = new List<JsonObject>(); int skipped = 0;
+        JsonArray? groups = null;
         if (System.Text.RegularExpressions.Regex.IsMatch(text, @"\A[a-zA-Z0-9]+://"))
         {
             foreach (string line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -57,7 +61,8 @@ static class Subscription
             JsonArray? nodes = root as JsonArray ?? (root as JsonObject)?["proxies"] as JsonArray;
             if (nodes == null && root is JsonObject single && single["type"] != null) nodes = new JsonArray(single.DeepClone());
             if (nodes == null) throw new IOException("未找到 proxies 节点列表。请使用机场的 Clash/Mihomo 节点订阅，暂不递归下载 proxy-providers。");
-            if (nodes.Count > 5000) throw new IOException("订阅节点超过 5000 个。");
+            groups = (root as JsonObject)?["proxy-groups"] as JsonArray;
+            if (nodes.Count > (cached ? 10000 : 5000)) throw new IOException("订阅条目过多。");
             foreach (var entry in nodes) { if (entry is JsonObject obj) candidates.Add((JsonObject)obj.DeepClone()); else skipped++; }
         }
         var result = new List<SubscriptionNode>();
@@ -71,6 +76,48 @@ static class Subscription
                 result.Add(new(name, node));
             }
             catch { skipped++; }
+        }
+        if (groups != null)
+        {
+            var sourceNames = candidates.Select(n => (n["name"] as JsonValue)?.ToString())
+                .Where(n => !string.IsNullOrEmpty(n)).ToLookup(n => n!, StringComparer.Ordinal);
+            var byName = result.Where(n => !ProxyConfiguration.IsFailover(n.Node) && sourceNames[n.Name].Count() == 1)
+                .ToDictionary(n => n.Name, n => n.Node, StringComparer.Ordinal);
+            var groupNames = new HashSet<string>(StringComparer.Ordinal);
+            int remainingMembers = 5000, remainingBytes = MaxBytes;
+            foreach (var entry in groups.OfType<JsonObject>())
+            {
+                if ((entry["type"] as JsonValue)?.ToString() != "fallback") continue;
+                try
+                {
+                    string name = entry["name"]?.GetValue<string>() ?? "";
+                    if (string.IsNullOrWhiteSpace(name) || sourceNames.Contains(name) || groupNames.Contains(name) ||
+                        entry.ContainsKey("use") || entry.ContainsKey("filter") || entry.ContainsKey("exclude-filter") ||
+                        entry.ContainsKey("exclude-type") || entry.ContainsKey("override") ||
+                        new[] { "include-all", "include-all-proxies", "include-all-providers" }.Any(key => entry[key]?.ToString() == "true") ||
+                        entry["proxies"] is not JsonArray refs || refs.Count < 2 || refs.Count > remainingMembers)
+                        throw new IOException();
+                    var unique = new HashSet<string>(StringComparer.Ordinal);
+                    var members = new JsonArray();
+                    int groupBytes = Encoding.UTF8.GetByteCount(name);
+                    foreach (var reference in refs)
+                    {
+                        string member = reference?.GetValue<string>() ?? "";
+                        if (member is "DIRECT" or "REJECT" or "REJECT-DROP" or "PASS" or "COMPATIBLE" or "GLOBAL" ||
+                            !unique.Add(member) || !byName.TryGetValue(member, out var node))
+                            throw new IOException();
+                        groupBytes += Encoding.UTF8.GetByteCount(node.ToJsonString());
+                        if (groupBytes > remainingBytes) throw new IOException();
+                        members.Add(node.DeepClone());
+                    }
+                    var group = new JsonObject { ["type"] = "fallback", ["name"] = name, ["members"] = members };
+                    groupNames.Add(name);
+                    remainingMembers -= members.Count;
+                    remainingBytes -= groupBytes;
+                    result.Add(new(name, group));
+                }
+                catch { skipped++; }
+            }
         }
         if (result.Count == 0) throw new IOException($"没有可用节点（跳过 {skipped} 项）。请使用包含所支持协议的 Clash/Mihomo 订阅。");
         return new(result, skipped);
@@ -91,7 +138,7 @@ static class Subscription
         }
         if (node is YamlSequenceNode sequence)
         {
-            var array = new JsonArray(); foreach (var item in sequence.Children) array.Add(ToJson(item, depth + 1, ref budget, key)); return array;
+            var array = new JsonArray(); foreach (var item in sequence.Children) array.Add(ToJson(item, depth + 1, ref budget, key == "proxies" && item is YamlScalarNode ? "name" : key)); return array;
         }
         var value = (YamlScalarNode)node; string s = value.Value ?? "";
         // Numeric-looking credentials, hostnames and fingerprints must remain strings.

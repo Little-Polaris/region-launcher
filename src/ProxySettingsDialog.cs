@@ -17,12 +17,13 @@ sealed class ProxySettingsDialog : Form
     readonly Button save = new() { Text = "校验并保存", AutoSize = true };
     readonly Button validate = new() { Text = "校验配置", AutoSize = true };
     readonly Button import = new() { Text = "导入文件…", AutoSize = true };
-    readonly Button subscription = new() { Text = "机场订阅 / 选节点…", AutoSize = true };
+    readonly Button subscription = new() { Text = "订阅 / 选节点或组…", AutoSize = true };
     readonly TabControl tabs = new() { Dock = DockStyle.Fill };
     readonly Dictionary<Control, Label> fieldLabels = new();
     readonly DedicatedProxy proxy;
     bool working;
     bool loading;
+    JsonObject? failover;
     string Type => ProxyConfiguration.Protocols[protocol.SelectedIndex];
     static readonly string[] FormKeys = ["name", "type", "server", "port", "uuid", "password", "sni", "servername", "cipher", "tls", "skip-cert-verify"];
 
@@ -35,9 +36,10 @@ sealed class ProxySettingsDialog : Form
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), ColumnCount = 1, RowCount = 4 };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "为环境内程序设置一个独立出口。网站连接和 DNS 均经此节点。\n保存后下次启动生效；节点凭据仅保存在本机，请勿分享配置文件。", AutoSize = true, Padding = new(0, 0, 0, 12) }, 0, 0);
+        layout.Controls.Add(new Label { Text = "选择固定节点，或导入自动故障切换组作为环境的独立出口。\n保存后下次启动生效；节点凭据仅保存在本机，请勿分享配置文件。", AutoSize = true, Padding = new(0, 0, 0, 12) }, 0, 0);
         layout.Controls.Add(tabs, 0, 1);
         var basic = new TabPage("节点设置"); var extra = new TabPage("高级选项"); tabs.TabPages.AddRange([basic, extra]);
+        tabs.Selecting += (_, e) => { if (failover != null && e.TabPage == extra) e.Cancel = true; };
         var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12), ColumnCount = 2, AutoScroll = true };
         grid.ColumnStyles.Add(new(SizeType.Absolute, 165)); grid.ColumnStyles.Add(new(SizeType.Percent, 100));
         void Row(string label, Control control)
@@ -50,7 +52,7 @@ sealed class ProxySettingsDialog : Form
         protocol.Items.AddRange(["Hysteria2", "VLESS", "VMess", "Trojan", "Shadowsocks", "TUIC", "AnyTLS"]);
         cipher.Items.AddRange(["aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"]);
         cipher.Text = "aes-128-gcm";
-        Row("代理协议", protocol); Row("服务器地址", server); Row("服务器端口", remotePort);
+        Row("代理出口", protocol); Row("服务器地址", server); Row("服务器端口", remotePort);
         Row("UUID", uuid); Row("密码", password); Row("加密方式", cipher);
         Row("TLS", tls); Row("服务器名 (SNI)", sni); Row("证书", skipVerify); Row("独立本地端口", localPort);
         basic.Controls.Add(grid);
@@ -65,7 +67,14 @@ sealed class ProxySettingsDialog : Form
         CancelButton = cancel;
         protocol.SelectedIndexChanged += (_, _) =>
         {
-            if (!loading) { advanced.Text = "{}"; uuid.Clear(); password.Clear(); cipher.Text = Type == "vmess" ? "auto" : "aes-128-gcm"; tls.Checked = true; skipVerify.Checked = false; }
+            if (loading || protocol.SelectedIndex < 0) return;
+            if (failover != null)
+            {
+                failover = null;
+                protocol.Items.RemoveAt(ProxyConfiguration.Protocols.Length);
+                status.Text = "";
+            }
+            advanced.Text = "{}"; uuid.Clear(); password.Clear(); cipher.Text = Type == "vmess" ? "auto" : "aes-128-gcm"; tls.Checked = true; skipVerify.Checked = false;
             UpdateFields();
         };
         protocol.SelectedIndex = 0;
@@ -93,13 +102,19 @@ sealed class ProxySettingsDialog : Form
         if (selector.ShowDialog(this) != DialogResult.OK || selector.SelectedNode == null) return;
         var selected = selector.SelectedNode;
         // The provider's inbound port never replaces the launcher's dedicated port.
-        var config = new JsonObject { ["mixed-port"] = (int)localPort.Value, ["proxies"] = new JsonArray(selected.DeepClone()) };
-        try { LoadText(config.ToJsonString()); status.Text = "已选择：" + selected["name"] + "。校验并保存后生效。"; }
-        catch { status.Text = "该节点参数无法载入表单，请选择其他节点；原配置未修改。"; }
+        try
+        {
+            LoadText(ProxyConfiguration.Build(selected, (int)localPort.Value).ToJsonString());
+            if (failover == null) status.Text = $"已选择 {selected["name"]}。校验并保存后生效。";
+        }
+        catch { status.Text = "无法载入所选配置，请检查参数和本地端口。原配置未修改。"; }
     }
 
     void UpdateFields()
     {
+        foreach (var control in new Control[] { server, remotePort, uuid, password, cipher, sni, skipVerify, tls })
+            control.Visible = fieldLabels[control].Visible = failover == null;
+        if (failover != null) return;
         string type = Type;
         uuid.Enabled = type is "vless" or "vmess" or "tuic";
         password.Enabled = type is not ("vless" or "vmess");
@@ -115,13 +130,27 @@ sealed class ProxySettingsDialog : Form
     internal void LoadText(string text)
     {
         var node = ProxyConfiguration.ReadNode(text, out int port);
-        int index = Array.IndexOf(ProxyConfiguration.Protocols, node["type"]?.GetValue<string>());
+        bool grouped = ProxyConfiguration.IsFailover(node);
+        int index = grouped ? ProxyConfiguration.Protocols.Length : Array.IndexOf(ProxyConfiguration.Protocols, node["type"]?.GetValue<string>());
         if (index < 0 || port < localPort.Minimum || port > localPort.Maximum) throw new IOException("不支持的节点或本地端口。");
         loading = true;
         try
         {
+            if (protocol.Items.Count > ProxyConfiguration.Protocols.Length) protocol.Items.RemoveAt(ProxyConfiguration.Protocols.Length);
+            failover = grouped ? node : null;
+            localPort.Value = port;
+            if (grouped)
+            {
+                protocol.Items.Add($"{node["name"]} · 自动故障切换（{node["members"]!.AsArray().Count} 个节点）");
+                protocol.SelectedIndex = index;
+                tabs.SelectedIndex = 0;
+                server.Clear(); uuid.Clear(); password.Clear(); advanced.Text = "{}";
+                status.Text = "Mihomo 按导入顺序选择可用节点。校验并保存后生效。";
+                UpdateFields();
+                return;
+            }
             protocol.SelectedIndex = index; server.Text = node["server"]?.GetValue<string>() ?? "";
-            remotePort.Value = node["port"]?.GetValue<int>() ?? 443; localPort.Value = port;
+            remotePort.Value = node["port"]?.GetValue<int>() ?? 443;
             uuid.Text = node["uuid"]?.GetValue<string>() ?? ""; password.Text = node["password"]?.GetValue<string>() ?? "";
             sni.Text = (node["sni"] ?? node["servername"])?.GetValue<string>() ?? "";
             cipher.Text = node["cipher"]?.GetValue<string>() ?? (Type == "vmess" ? "auto" : "aes-128-gcm");
@@ -134,6 +163,7 @@ sealed class ProxySettingsDialog : Form
 
     internal JsonObject ReadConfig()
     {
+        if (failover != null) return ProxyConfiguration.Build(failover, (int)localPort.Value);
         JsonObject node;
         try { node = JsonNode.Parse(advanced.Text) as JsonObject ?? throw new IOException(); }
         catch { throw new IOException("高级选项必须是 JSON 对象，例如 {}。"); }

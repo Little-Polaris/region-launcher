@@ -29,6 +29,7 @@ sealed class DedicatedProxy : IDisposable
     public bool HasExitedCore => process is { HasExited: true };
     readonly SemaphoreSlim gate = new(1);
     public bool Configured => File.Exists(config);
+    public bool UsesFailover => ProxyConfiguration.IsFailover(ProxyConfiguration.ReadNode(File.ReadAllText(config), out _));
     public event Action? UnexpectedExit;
     public int Port { get { using var json = JsonDocument.Parse(File.ReadAllText(config)); return json.RootElement.GetProperty("mixed-port").GetInt32(); } }
     public string DnsAddress {
@@ -51,7 +52,7 @@ sealed class DedicatedProxy : IDisposable
         {
             ProxyConfiguration.ValidateRuntimePolicy(config);
             string hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(config)));
-            // A recovery must keep the original node, listeners and DNS for the existing group.
+            // A recovery must keep the same exit configuration for the existing session.
             if (fingerprint != null && hash != fingerprint)
                 throw new IOException("代理配置在运行期间发生变化，请恢复原配置，或退出环境后重新配置。");
             if (process is { HasExited: false }) {

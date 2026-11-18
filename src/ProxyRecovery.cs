@@ -13,7 +13,7 @@ sealed class ProxyRecovery(
     long? lastRestart;
     public bool Recovered { get; private set; }
 
-    public async Task<ProbeResult[]> CheckAsync(CancellationToken cancellationToken)
+    public async Task<ProbeResult[]> CheckAsync(CancellationToken cancellationToken, bool restartOnProbeFailure = true)
     {
         await gate.WaitAsync(cancellationToken);
         try {
@@ -29,6 +29,9 @@ sealed class ProxyRecovery(
             results = await probe(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             if (results.Any(r => r.Ok)) { Recovered = true; log("[代理修复] 复查已恢复，无需重启代理。"); return results; }
+
+            if (!restartOnProbeFailure)
+                throw new IOException("自动故障切换组暂未通过实际联网检测。Mihomo 会继续检查节点；已有程序保持运行，新程序暂不启动。请查看日志确认节点、DNS 或上游网络状态。");
 
             var cooldown = restartCooldown ?? TimeSpan.FromMinutes(1);
             if (lastRestart is long previous && time.GetElapsedTime(previous) < cooldown)
