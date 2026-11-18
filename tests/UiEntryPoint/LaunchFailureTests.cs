@@ -13,6 +13,26 @@ static class LaunchFailureTests
         while (!task.IsCompleted && timeout.ElapsedMilliseconds < 15000) { Application.DoEvents(); Thread.Sleep(10); }
         Check(task.IsCompleted, "Launch failure test timed out");
     }
+    public static void CheckTile(Form form, Button tile, string data) {
+        using var timer = new System.Windows.Forms.Timer { Interval = 40 };
+        bool notified = false;
+        timer.Tick += (_, _) => EnumThreadWindows(GetCurrentThreadId(), (window, _) => {
+            var title = new StringBuilder(128); GetWindowText(window, title, title.Capacity);
+            if (title.ToString() == "启动失败") { notified = true; PostMessage(window, 0x0010, 0, 0); }
+            return true;
+        }, 0);
+        timer.Start();
+        tile.PerformClick();
+        timer.Stop();
+        Check(notified, "Clicking an app tile did not attempt to launch it");
+        string logs = string.Concat(Directory.GetFiles(Path.Combine(data, "logs"), "*.log").Select(path => {
+            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(file);
+            return reader.ReadToEnd();
+        }));
+        Check(logs.Contains("请求启动软件：" + tile.Text + "；"), "Clicked tile did not launch the matching entry or write its background log");
+        Console.WriteLine("PASS: clicking an app tile routes the matching entry to the launch path and writes a background log.");
+    }
     public static void Run(Form form) {
         var type = form.GetType();
         var tray = (NotifyIcon)type.GetField("tray", Hidden)!.GetValue(form)!;
@@ -51,14 +71,13 @@ static class LaunchFailureTests
             Pump(monitor); monitor.GetAwaiter().GetResult(); end.Invoke(form, first);
             Check(acknowledged && (bool)type.GetField("preparing", Hidden)!.GetValue(form)!, "Old exit cleared new preparation");
             object[] overlap = { 0L }; Check(!(bool)begin.Invoke(form, overlap)!, "Overlapping check accepted");
-            Check(!((Button)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Enabled, "Manual check enabled during preparation");
+            Check(!((ToolStripMenuItem)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Enabled, "Manual check enabled during preparation");
             end.Invoke(form, next);
         }
         Console.WriteLine("PASS: startup acknowledgement gates preparation; old process exit preserves newer preparation and rejects overlapping checks");
-        var failure = (Task)type.GetMethod("StartSession", Hidden)!.Invoke(form, null)!;
-        Pump(failure); failure.GetAwaiter().GetResult();
+        type.GetMethod("NotifyLaunchFailure", Hidden)!.Invoke(form, new object[] { "测试程序" });
         Check(dialogs == 0, "Hidden failure opened a modal dialog");
-        Check(!form.Visible && tray.BalloonTipTitle.Contains("启动失败") && tray.BalloonTipText.Contains("所选程序") && tray.BalloonTipIcon == ToolTipIcon.Error,
+        Check(!form.Visible && tray.BalloonTipTitle.Contains("启动失败") && tray.BalloonTipText.Contains("测试程序") && tray.BalloonTipIcon == ToolTipIcon.Error,
             "Hidden launch failure did not request an error notification");
         tray.GetType().GetMethod("OnBalloonTipClicked", Hidden)!.Invoke(tray, null);
         Check(form.Visible && form.WindowState != FormWindowState.Minimized, "Notification click did not restore launcher");

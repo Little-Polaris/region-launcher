@@ -42,25 +42,13 @@ sealed class Profile
 
 sealed class Launcher : Form
 {
-    readonly ComboBox software = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly Button addSoftware = new() { Text = "添加…", AutoSize = true };
-    readonly Button editSoftware = new() { Text = "编辑…", AutoSize = true };
-    readonly Button removeSoftware = new() { Text = "删除", AutoSize = true };
-    readonly TextBox executable = new() { Dock = DockStyle.Fill, ReadOnly = true };
-    readonly TextBox arguments = new() { Dock = DockStyle.Fill, ReadOnly = true };
-    readonly TextBox proxyHost = new() { Text = "127.0.0.1", Width = 180 };
-    readonly NumericUpDown proxyPort = new() { Minimum = 1, Maximum = 65535, Value = 7890, Width = 90 };
-    readonly SearchComboBox country = new() { Name = "Country", Dock = DockStyle.Fill };
-    readonly SearchComboBox language = new() { Name = "Language", Dock = DockStyle.Fill };
-    readonly SearchComboBox timeZone = new() { Name = "TimeZone", Dock = DockStyle.Fill };
-    readonly Label timeNote = new() { AutoSize = true, Padding = new(0, 6, 0, 6) };
-    readonly CheckBox dst = new() { Text = "自动切换夏令时与标准时间", Checked = true, AutoSize = true };
-    readonly TextBox log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
-    readonly Button start = new() { Text = "启动所选程序", AutoSize = true };
-    readonly Button configureProxy = new() { Text = "独立代理配置…", AutoSize = true };
-    readonly Button switchProxy = new() { Text = "切换节点…", AutoSize = true };
-    readonly Button checkProxy = new() { Text = "检测并修复", AutoSize = true };
-    readonly Button linkBrowser = new() { Text = "授权浏览器…", AutoSize = true };
+    readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new(24, 12, 24, 24) };
+    readonly ContextMenuStrip actions = new();
+    readonly ToolStripMenuItem configureProxy = new("独立代理配置…");
+    readonly ToolStripMenuItem switchProxy = new("切换节点…");
+    readonly ToolStripMenuItem checkProxy = new("检测并修复");
+    readonly ToolStripMenuItem linkBrowser = new("授权浏览器…");
+    readonly ToolStripMenuItem probe = new("添加环境测试程序");
     bool preparing;
     long preparationId;
     bool exiting, allowClose;
@@ -73,8 +61,6 @@ sealed class Launcher : Form
     readonly string data;
     readonly ApplicationLibrary library;
     ApplicationList? applicationList;
-    bool loadingSoftware;
-    bool loadingSettings;
     readonly DedicatedProxy dedicatedProxy;
     readonly ProxyRecovery proxyRecovery;
     readonly DiagnosticLog? diagnostics;
@@ -90,29 +76,25 @@ sealed class Launcher : Form
         dedicatedProxy = new(Append, values => diagnostics?.AddSecrets(values));
         proxyRecovery = new(dedicatedProxy.EnsureStarted, dedicatedProxy.ReconnectAsync,
             ct => ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: ct), Append);
-        Text = "Region Launcher · 环境验证版"; ClientSize = new(840, 760); MinimumSize = new(750, 710);
+        Text = "Region Launcher"; ClientSize = new(720, 416); MinimumSize = new(370, 280);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), ColumnCount = 3, RowCount = 14 };
-        grid.ColumnStyles.Add(new(SizeType.Absolute, 120)); grid.ColumnStyles.Add(new(SizeType.Percent, 100)); grid.ColumnStyles.Add(new(SizeType.Absolute, 100));
-        for (int i = 0; i < 13; i++) grid.RowStyles.Add(new(SizeType.AutoSize));
-        grid.RowStyles.Add(new(SizeType.Percent, 100));
-        var title = new Label { Text = "独立运行环境", AutoSize = true, Font = new(Font, FontStyle.Bold), Padding = new(0, 0, 0, 12) };
-        grid.Controls.Add(title, 0, 0); grid.SetColumnSpan(title, 3);
-        var notice = new Label { Text = "网络验证原型：Claude 已验证启动及启动阶段联网；登录后功能仍待验证。单实例程序可能把请求交给外部已有进程。", AutoSize = true, MaximumSize = new(730, 0), ForeColor = Color.DarkRed, Padding = new(0, 0, 0, 12) };
-        grid.Controls.Add(notice, 0, 1); grid.SetColumnSpan(notice, 3);
-        AddLabel(grid, "运行软件", 2);
-        var apps = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, RowCount = 1, Margin = Padding.Empty };
-        apps.ColumnStyles.Add(new(SizeType.Percent, 100));
-        for (int i = 0; i < 3; ++i) apps.ColumnStyles.Add(new(SizeType.AutoSize));
-        apps.Controls.Add(software, 0, 0); apps.Controls.Add(addSoftware, 1, 0); apps.Controls.Add(editSoftware, 2, 0); apps.Controls.Add(removeSoftware, 3, 0);
-        grid.Controls.Add(apps, 1, 2); grid.SetColumnSpan(apps, 2);
-        software.SelectedIndexChanged += (_, _) => SelectSoftware();
-        addSoftware.Click += (_, _) => EditSoftware(false); editSoftware.Click += (_, _) => EditSoftware(true);
-        removeSoftware.Click += (_, _) => RemoveSoftware();
-        AddLabel(grid, "程序路径", 3); grid.Controls.Add(executable, 1, 3); grid.SetColumnSpan(executable, 2);
-        AddLabel(grid, "启动参数", 4); grid.Controls.Add(arguments, 1, 4); grid.SetColumnSpan(arguments, 2);
-        AddLabel(grid, "独立代理", 5);
-        var proxy = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; proxy.Controls.Add(proxyHost); proxy.Controls.Add(proxyPort);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        BackColor = Color.FromArgb(245, 247, 250);
+        var header = new Panel { Dock = DockStyle.Top, Height = 72, Padding = new(30, 16, 30, 12) };
+        var title = new Label {
+            Text = "应用", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+            Font = new(Font.FontFamily, 19, FontStyle.Bold), ForeColor = Color.FromArgb(28, 39, 60)
+        };
+        var more = new Button {
+            Text = "⋯", AccessibleName = "设置与工具", Dock = DockStyle.Right, Width = 44, Cursor = Cursors.Hand,
+            FlatStyle = FlatStyle.Flat, Font = new("Segoe UI", 18), ForeColor = title.ForeColor, BackColor = Color.White
+        };
+        more.FlatAppearance.BorderColor = Color.FromArgb(222, 228, 238);
+        more.Click += (_, _) => actions.Show(more, new Point(more.Width, more.Height + 4), ToolStripDropDownDirection.BelowLeft);
+        header.Controls.Add(title); header.Controls.Add(more);
+        Controls.Add(tiles); Controls.Add(header);
+        var openLogs = new ToolStripMenuItem("打开日志", null, (_, _) => OpenLogs());
+        actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, openLogs]);
         checkProxy.Click += async (_, _) => await TrackOperation(async () => {
             if (!BeginPreparation(out long operation)) return;
             try { var result = await CheckProxy(); NotifyCheckResult(result.Recovered, result.Detail, null); }
@@ -127,42 +109,15 @@ sealed class Launcher : Form
             }
         };
         switchProxy.Click += async (_, _) => await TrackOperation(SwitchProxyAsync);
-        proxy.Controls.Add(checkProxy); proxy.Controls.Add(configureProxy); proxy.Controls.Add(switchProxy);
-        grid.Controls.Add(proxy, 1, 5); grid.SetColumnSpan(proxy, 2);
-        country.SetOptions(WindowsSettings.Regions().Cast<object>().ToArray());
-        language.SetOptions(WindowsSettings.Languages().Cast<object>().ToArray());
-        timeZone.SetOptions(WindowsSettings.TimeZones().Cast<object>().ToArray());
-        AddLabel(grid, "国家或地区", 6); grid.Controls.Add(country, 1, 6); grid.SetColumnSpan(country, 2);
-        AddLabel(grid, "语言", 7); grid.Controls.Add(language, 1, 7); grid.SetColumnSpan(language, 2);
-        AddLabel(grid, "时区", 8); grid.Controls.Add(timeZone, 1, 8); grid.SetColumnSpan(timeZone, 2);
-        grid.Controls.Add(dst, 1, 9); grid.SetColumnSpan(dst, 2);
-        grid.Controls.Add(timeNote, 1, 10); grid.SetColumnSpan(timeNote, 2);
-        timeZone.SelectedIndexChanged += (_, _) => UpdateTimeNote(); dst.CheckedChanged += (_, _) => UpdateTimeNote();
-        UpdateTimeNote();
-        var access = new Label { Text = "关闭窗口后在托盘运行；从托盘退出会结束全部运行，请先保存文件。", AutoSize = true, Padding = new(0, 4, 0, 8) };
-        grid.Controls.Add(access, 0, 11); grid.SetColumnSpan(access, 3);
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; buttons.Controls.Add(start);
-        var probe = new Button { Text = "选择环境测试程序", AutoSize = true }; probe.Click += (_, _) => {
+        probe.Click += (_, _) => {
             if (preparing || applicationList == null) return;
-            var entry = applicationList.Applications.FirstOrDefault(a => a.Application == "RegionProbe.exe" && a.Arguments == "")
-                ?? new LaunchApplication { Name = "环境测试程序", Application = "RegionProbe.exe", Environment = ReadSettings() };
-            SaveSoftware(entry);
+            var entry = applicationList.Applications.FirstOrDefault(a => a.Application == "RegionProbe.exe" && a.Arguments == "");
+            if (entry == null) SaveSoftware(new LaunchApplication { Name = "环境测试程序", Application = "RegionProbe.exe", Environment = DefaultEnvironment });
         };
-        buttons.Controls.Add(probe); grid.Controls.Add(buttons, 0, 12); grid.SetColumnSpan(buttons, 3);
-        var openLogs = new Button { Text = "打开日志", AutoSize = true };
-        openLogs.Click += (_, _) => {
-            try { var folder = Path.Combine(data, "logs"); Directory.CreateDirectory(folder); Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true }); }
-            catch (Exception ex) { Append("无法打开日志目录：" + ex.Message); }
-        };
-        buttons.Controls.Add(openLogs);
-        buttons.Controls.Add(linkBrowser);
         linkBrowser.Click += (_, _) => {
             try { using var dialog = new LinkBrowserDialog(data, applicationList); if (dialog.ShowDialog(this) == DialogResult.OK) Append("授权链接浏览器已保存，下次启动程序生效。"); }
             catch (Exception ex) { Append("授权浏览器配置读取失败：" + ex.Message); }
         };
-        grid.Controls.Add(log, 0, 13); grid.SetColumnSpan(log, 3); Controls.Add(grid);
-        ApplySettings(new LaunchEnvironment());
-        start.Click += async (_, _) => await TrackOperation(StartSession);
         trayMenu.Items.Add("打开启动器", null, (_, _) => RestoreWindow());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("退出（结束全部运行）", null, async (_, _) => await ExitAsync());
@@ -178,32 +133,40 @@ sealed class Launcher : Form
         };
         dedicatedProxy.UnexpectedExit += () => Append("独立代理内核已退出；已启动的软件和网络隔离保留。点击“检测并修复”或启动新程序时将重新连接代理。");
         Directory.CreateDirectory(data);
-        try { var p = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))); if (p != null) { executable.Text = p.Application; arguments.Text = p.Arguments; proxyHost.Text = p.ProxyHost; proxyPort.Value = Math.Clamp(p.ProxyPort, 1, 65535); ApplySettings(new LaunchEnvironment { GeoId = p.GeoId, Locale = p.Locale, TimeZone = p.TimeZone, AutoDst = p.AutoDst }); } } catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
-        try { applicationList = library.Load(executable.Text, arguments.Text, ReadSettings()); RefreshSoftware(); }
+        Profile legacy = new();
+        try { legacy = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))) ?? new(); }
+        catch (FileNotFoundException) {} catch (Exception ex) { Append("配置读取失败，使用默认值：" + ex.Message); }
+        try {
+            var legacyEnvironment = new LaunchEnvironment { GeoId = legacy.GeoId, Locale = legacy.Locale, TimeZone = legacy.TimeZone, AutoDst = legacy.AutoDst };
+            try { legacyEnvironment.Validate(); }
+            catch (InvalidDataException) { legacyEnvironment = new(); }
+            applicationList = library.Load(legacy.Application, legacy.Arguments, legacyEnvironment);
+        }
         catch (Exception ex) { Append($"软件列表读取失败，原文件已保留：{ex.Message} 请检查 {Path.Combine(data, "applications.json")} 后重启。"); }
-        country.SelectedIndexChanged += (_, _) => SaveSettings();
-        language.SelectedIndexChanged += (_, _) => SaveSettings();
-        timeZone.SelectedIndexChanged += (_, _) => SaveSettings();
-        dst.CheckedChanged += (_, _) => SaveSettings();
+        RefreshSoftware();
         RefreshProxy();
-        UpdateTimeNote();
         Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
-        if (logError != null) Append("日志文件不可写：" + logError);
-        Append("地区、语言、时区按软件自动保存，下次启动生效；已运行的程序不变。代理由本次运行共用。");
+        if (logError != null) Shown += (_, _) => MessageBox.Show(this, logError, "日志文件不可写", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+    void OpenLogs()
+    {
+        try {
+            var folder = Path.Combine(data, "logs"); Directory.CreateDirectory(folder);
+            Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex) {
+            Append("无法打开日志目录：" + ex.Message);
+            MessageBox.Show(this, ex.Message, "无法打开日志目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
     void RefreshProxy()
     {
-        proxyHost.Text = "127.0.0.1"; proxyHost.ReadOnly = true; proxyHost.Enabled = proxyPort.Enabled = false;
-        try {
-            proxyPort.Value = dedicatedProxy.Configured ? dedicatedProxy.Port : 17890;
-            Append(dedicatedProxy.Configured ? "已加载独立代理配置；公网走所选出口，局域网直连，DNS 使用专用解析器。" : "请点击“独立代理配置”填写节点或导入配置。");
-        }
-        catch { Append("独立代理配置无法读取，请点击“独立代理配置”修正。"); }
+        Append(dedicatedProxy.Configured ? "已加载独立代理配置；公网走所选出口，局域网直连，DNS 使用专用解析器。" : "请在右上角菜单选择“独立代理配置”填写节点或导入配置。");
         UpdateActions();
     }
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); windowIcon.Dispose(); trayIcon.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
+        if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); actions.Dispose(); windowIcon.Dispose(); trayIcon.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
         base.Dispose(disposing);
     }
     internal void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
@@ -230,14 +193,11 @@ sealed class Launcher : Form
     void UpdateActions()
     {
         if (exiting) { foreach (Control control in Controls) control.Enabled = false; return; }
-        start.Enabled = !preparing && software.SelectedItem is LaunchApplication && applicationList != null;
-        software.Enabled = addSoftware.Enabled = !preparing && applicationList != null;
-        editSoftware.Enabled = removeSoftware.Enabled = start.Enabled;
+        tiles.Enabled = probe.Enabled = !preparing && applicationList != null;
         configureProxy.Enabled = session == null && !preparing;
         switchProxy.Enabled = !preparing && dedicatedProxy.Configured;
         linkBrowser.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;
-        country.Enabled = language.Enabled = timeZone.Enabled = dst.Enabled = start.Enabled;
     }
 
     async Task SwitchProxyAsync()
@@ -271,31 +231,35 @@ sealed class Launcher : Form
         if (operation == preparationId) preparing = false;
         UpdateActions();
     }
+    LaunchEnvironment DefaultEnvironment =>
+        applicationList?.Applications.Find(app => app.Id == applicationList.SelectedId)?.Environment ?? new();
+
     void RefreshSoftware()
     {
-        loadingSoftware = true;
-        software.Items.Clear();
-        software.Items.AddRange(applicationList!.Applications.Cast<object>().ToArray());
-        software.SelectedItem = applicationList.Applications.FirstOrDefault(a => a.Id == applicationList.SelectedId) ?? applicationList.Applications.FirstOrDefault();
-        loadingSoftware = false; SelectSoftware();
-    }
-    void SelectSoftware()
-    {
-        if (loadingSoftware) return;
-        var entry = software.SelectedItem as LaunchApplication;
-        executable.Text = entry?.Application ?? ""; arguments.Text = entry?.Arguments ?? "";
-        if (entry != null) ApplySettings(entry.Environment ?? new LaunchEnvironment());
-        if (applicationList != null && applicationList.SelectedId != entry?.Id) {
-            var updated = applicationList with { SelectedId = entry?.Id };
-            try { library.Save(updated); applicationList = updated; }
-            catch (Exception ex) { Append("无法保存软件选择：" + ex.Message); }
-        }
+        tiles.SuspendLayout();
+        try {
+            while (tiles.Controls.Count != 0) tiles.Controls[0].Dispose();
+            if (applicationList != null) {
+                foreach (var entry in applicationList.Applications) {
+                    var tile = new ApplicationTile(entry);
+                    tile.Click += async (_, _) => await TrackOperation(() => StartSession(entry));
+                    var menu = new ContextMenuStrip();
+                    menu.Items.Add("编辑软件…", null, (_, _) => EditSoftware(entry));
+                    menu.Items.Add("删除软件…", null, (_, _) => RemoveSoftware(entry));
+                    tile.ContextMenuStrip = menu;
+                    tiles.Controls.Add(tile);
+                }
+            }
+            var add = new ApplicationTile(null);
+            add.Click += (_, _) => EditSoftware(null);
+            tiles.Controls.Add(add);
+        } finally { tiles.ResumeLayout(); }
         UpdateActions();
     }
-    void EditSoftware(bool edit)
+    void EditSoftware(LaunchApplication? entry)
     {
         if (preparing || applicationList == null) return;
-        using var dialog = new ApplicationEditor(edit ? software.SelectedItem as LaunchApplication : null, ReadSettings());
+        using var dialog = new ApplicationEditor(entry, DefaultEnvironment);
         if (dialog.ShowDialog(this) == DialogResult.OK) SaveSoftware(dialog.Entry!);
     }
     void SaveSoftware(LaunchApplication entry)
@@ -311,62 +275,14 @@ sealed class Launcher : Form
         try { library.Save(updated); applicationList = updated; RefreshSoftware(); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存软件列表", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
-    void RemoveSoftware()
+    void RemoveSoftware(LaunchApplication entry)
     {
-        if (preparing || applicationList == null || software.SelectedItem is not LaunchApplication entry) return;
+        if (preparing || applicationList == null) return;
         if (MessageBox.Show(this, $"从列表中删除“{entry.Name}”？这不会卸载软件或删除其文件。", "删除软件", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
         var entries = applicationList.Applications.Where(a => a.Id != entry.Id).ToList();
         SaveSoftwareList(applicationList with { SelectedId = entries.FirstOrDefault()?.Id, Applications = entries });
     }
-    LaunchEnvironment ReadSettings() => new() {
-        GeoId = (country.Value as RegionOption)?.GeoId ?? 244,
-        Locale = (language.Value as LanguageOption)?.Name ?? "en-US",
-        TimeZone = (timeZone.Value as TimeZoneInfo)?.Id ?? "Pacific Standard Time", AutoDst = dst.Checked
-    };
-    void SaveSettings()
-    {
-        if (loadingSettings || loadingSoftware || preparing || applicationList == null || software.SelectedItem is not LaunchApplication entry) return;
-        var changed = entry with { Environment = ReadSettings() };
-        if (changed == entry) return;
-        var updated = applicationList with { Applications = applicationList.Applications.Select(a => a.Id == entry.Id ? changed : a).ToList() };
-        try {
-            library.Save(updated); applicationList = updated;
-            loadingSoftware = true;
-            int index = software.SelectedIndex; software.Items[index] = changed; software.SelectedIndex = index;
-        } catch (Exception ex) { ApplySettings(entry.Environment ?? new LaunchEnvironment()); Append("地区设置未保存：" + ex.Message); }
-        finally { loadingSoftware = false; UpdateActions(); }
-    }
-    void ApplySettings(LaunchEnvironment profile)
-    {
-        loadingSettings = true;
-        country.ResetFilter(); language.ResetFilter(); timeZone.ResetFilter();
-        country.SelectedItem = country.Items.Cast<RegionOption>().FirstOrDefault(r => r.GeoId == profile.GeoId) ?? country.Items.Cast<RegionOption>().First(r => r.GeoId == 244);
-        language.SelectedItem = language.Items.Cast<LanguageOption>().FirstOrDefault(l => l.Name.Equals(profile.Locale, StringComparison.OrdinalIgnoreCase)) ?? language.Items.Cast<LanguageOption>().First(l => l.Name == "en-US");
-        timeZone.SelectedItem = timeZone.Items.Cast<TimeZoneInfo>().FirstOrDefault(z => z.Id == profile.TimeZone) ?? timeZone.Items.Cast<TimeZoneInfo>().First(z => z.Id == "Pacific Standard Time");
-        dst.Checked = profile.AutoDst; UpdateTimeNote();
-        loadingSettings = false;
-    }
-    void UpdateTimeNote()
-    {
-        if (timeZone.Value is not TimeZoneInfo zone) return;
-        TimeSpan offset = dst.Checked ? zone.GetUtcOffset(DateTime.UtcNow) : zone.BaseUtcOffset;
-        string sign = offset < TimeSpan.Zero ? "−" : "+";
-        timeNote.Text = $"{(dst.Checked ? "按 Windows 时区规则自动切换" : "全年使用标准时间")}；当前 UTC{sign}{offset.Duration():hh\\:mm}。";
-    }
-    static void AddLabel(TableLayoutPanel grid, string text, int row) => grid.Controls.Add(new Label { Text = text, AutoSize = true, Padding = new(0, 6, 0, 0) }, 0, row);
-    void Append(string text)
-    {
-        string line = diagnostics?.Write(text) ?? $"[{DateTime.Now:HH:mm:ss}] {text}";
-        if (IsDisposed || Disposing) return;
-        if (InvokeRequired) { try { BeginInvoke(() => ShowLog(line)); } catch (InvalidOperationException) { } return; }
-        ShowLog(line);
-    }
-    void ShowLog(string line)
-    {
-        if (IsDisposed || Disposing) return;
-        if (log.TextLength > 120000) log.Text = log.Text[^60000..];
-        log.AppendText(line + Environment.NewLine);
-    }
+    void Append(string text) => diagnostics?.Write(text);
     async Task<(bool Recovered, string Detail)> CheckProxy()
     {
         if (!dedicatedProxy.Configured) throw new IOException("请先点击“独立代理配置”填写或导入节点。");
@@ -401,33 +317,36 @@ sealed class Launcher : Form
     {
         if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
         string title = error != null ? "检测并修复：未能恢复连接" : recovered ? "检测并修复：连接已恢复" : "检测并修复：连接正常";
-        string message = error != null ? "本次检测或修复未通过。\n\n" + error + "\n\n请点击“打开日志”查看详情。" : detail;
+        string message = error != null ? "本次检测或修复未通过。\n\n" + error + "\n\n请从右上角菜单打开日志查看详情。" : detail;
         Append(title);
         RestoreWindow();
         MessageBox.Show(this, message, title, MessageBoxButtons.OK, error != null ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
     }
-    async Task StartSession()
+    async Task StartSession(LaunchApplication selected)
     {
         if (!BeginPreparation(out long operation)) return;
         bool join = session != null;
-        string applicationName = (software.SelectedItem as LaunchApplication)?.Name ?? "所选程序";
         try
         {
-            if (software.SelectedItem is not LaunchApplication selected) throw new IOException("请先添加并选择要启动的软件。");
             ApplicationLibrary.ValidateEntry(selected);
-            string app = ApplicationLibrary.ResolvePath(selected.Application); if (!File.Exists(app)) throw new FileNotFoundException("程序不存在，请点击“编辑”更新程序路径。");
+            string app = ApplicationLibrary.ResolvePath(selected.Application); if (!File.Exists(app)) throw new FileNotFoundException("程序不存在，请右键应用图标，编辑程序路径。");
+            if (applicationList is { } list && list.SelectedId != selected.Id) {
+                var updated = list with { SelectedId = selected.Id };
+                try { library.Save(updated); applicationList = updated; }
+                catch (Exception ex) { Append("无法保存上次启动的软件：" + ex.Message); }
+            }
             string appArgs = selected.Arguments;
             Append($"请求启动软件：{selected.Name}；程序={app}；模式={(join ? "加入当前环境" : "新建环境")}。");
-            foreach (string s in new[] { app, appArgs, proxyHost.Text }) if (s.Contains('\n') || s.Contains('\r') || s.Contains('\0')) throw new ArgumentException("配置不能包含换行符或空字符。");
+            foreach (string s in new[] { app, appArgs }) if (s.Contains('\n') || s.Contains('\r') || s.Contains('\0')) throw new ArgumentException("配置不能包含换行符或空字符。");
             if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
             string dnsAddress = dedicatedProxy.DnsAddress;
-            start.Enabled = false; await CheckProxy();
+            await CheckProxy();
             shutdown.Token.ThrowIfCancellationRequested();
             if (join && session is not { HasExited: false }) throw new IOException("原运行环境已结束，请重新启动所选程序。");
             var settings = selected.Environment ?? throw new IOException("所选软件缺少地区设置，请重新编辑并保存。");
             settings.Validate();
             var region = WindowsSettings.Regions().Single(r => r.GeoId == settings.GeoId);
-            var profile = new Profile { GeoId = settings.GeoId, Locale = settings.Locale, TimeZone = settings.TimeZone, Application = selected.Application, Arguments = selected.Arguments, ProxyHost = proxyHost.Text.Trim(), ProxyPort = (int)proxyPort.Value, AutoDst = settings.AutoDst };
+            var profile = new Profile { GeoId = settings.GeoId, Locale = settings.Locale, TimeZone = settings.TimeZone, Application = selected.Application, Arguments = selected.Arguments, ProxyHost = "127.0.0.1", ProxyPort = dedicatedProxy.Port, AutoDst = settings.AutoDst };
             Append($"软件环境：{selected.Name}；地区={region.Code}，语言={settings.Locale}，时区={settings.TimeZone}，自动冬夏时间={settings.AutoDst}。");
             File.WriteAllText(Path.Combine(data, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
             string id = Guid.NewGuid().ToString("N"); if (!join) currentJob = @"Local\RegionLauncher." + id;
@@ -454,7 +373,7 @@ sealed class Launcher : Form
         catch (Exception ex) {
             Append("未启动或运行失败：" + ex.Message);
             if (session is { HasExited: true }) { session.Dispose(); session = null; }
-            NotifyLaunchFailure(applicationName);
+            NotifyLaunchFailure(selected.Name);
         }
         finally { EndPreparation(operation); }
     }
@@ -469,11 +388,11 @@ sealed class Launcher : Form
         if (started.Task.IsCompletedSuccessfully) onStarted?.Invoke();
         await process.WaitForExitAsync(); await logs;
         // Session exit codes also include the application's own exit code; only missing startup is a launch failure.
-        if (!started.Task.IsCompletedSuccessfully) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见前面的日志。");
+        if (!started.Task.IsCompletedSuccessfully) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见日志。");
     }
     void NotifyLaunchFailure(string applicationName) {
         if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
-        string message = $"“{applicationName}”未能启动。请在启动器中点击“打开日志”查看失败原因。";
+        string message = $"“{applicationName}”未能启动。请从启动器右上角菜单打开日志查看失败原因。";
         if (Visible && WindowState != FormWindowState.Minimized)
             MessageBox.Show(this, message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
         else {
