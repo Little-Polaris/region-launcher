@@ -43,6 +43,13 @@ static class ProxyConfiguration
 
     public static bool IsFailover(JsonObject input) => input["type"]?.GetValue<string>() == "fallback";
 
+    internal static void PrepareRuntime(JsonObject validatedConfig)
+    {
+        validatedConfig["log-level"] = "info";
+        if (validatedConfig["proxy-groups"] is JsonArray)
+            validatedConfig["dns"]!["nameserver"]!.AsArray().Add("https://8.8.8.8/dns-query#RegionExit");
+    }
+
     static JsonObject NormalizeNode(JsonObject input, string name)
     {
         var node = (JsonObject)input.DeepClone();

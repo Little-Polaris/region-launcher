@@ -354,14 +354,11 @@ sealed class Launcher : Form
         var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token, restartOnProbeFailure: !failover);
         shutdown.Token.ThrowIfCancellationRequested();
         ProxyHealth.RequireInternet(throughProxy);
-        ProbeResult[] inside;
-        try { inside = await EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token); }
-        catch (IOException) when (!shutdown.IsCancellationRequested) {
-            Append("[故障复核] 环境检测失败，立即复查指定代理的实际联网，不重启代理。");
-            var recheck = await ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[故障复核] " + s), cancellationToken: shutdown.Token);
-            Append(recheck.Any(r => r.Ok) ? "[故障复核] 指定代理仍有成功响应，需对照环境接管与站点日志；不能据此认定节点完全正常。" : "[故障复核] 指定代理也全部失败，故障涉及代理或其上游链路；本次目标程序未启动。");
-            throw;
-        }
+        var (inside, proxyRecheck) = await EnvironmentCheck.RunWithRecheckAsync(
+            () => EnvironmentCheck.RunAsync(AppContext.BaseDirectory, data, dedicatedProxy.Port, dedicatedProxy.DnsAddress, session == null ? null : currentJob, Append, diagnostics, shutdown.Token),
+            () => ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[故障复核] " + s), cancellationToken: shutdown.Token),
+            failover, Append, shutdown.Token);
+        throughProxy = proxyRecheck ?? throughProxy;
         try { ProxyHealth.RequireMatchingExit(throughProxy, inside); }
         catch (IOException) when (failover && !shutdown.IsCancellationRequested)
         {
@@ -373,7 +370,7 @@ sealed class Launcher : Form
         Append("此结果验证检测程序当前的 TCP/HTTPS 路径，不代表所有应用、UDP 或所有网站始终可用；不能用国内网站加载快慢判断是否直连。");
         string detail = $"实际联网及环境出口校验通过。\n代理检测：{throughProxy.Count(r => r.Ok)}/{throughProxy.Length} 个站点成功。\n环境检测：{inside.Count(r => r.Ok)}/{inside.Length} 个站点成功。";
         if (throughProxy.Any(r => !r.Ok) || inside.Any(r => !r.Ok)) detail += "\n部分检测站点未通过，请查看日志了解详情。";
-        return (exitedCore || proxyRecovery.Recovered, detail);
+        return (exitedCore || proxyRecovery.Recovered || proxyRecheck != null, detail);
     }
     void NotifyCheckResult(bool recovered, string detail, string? error)
     {

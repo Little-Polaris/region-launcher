@@ -26,6 +26,31 @@ static class RecoveryTests
         await Case("failover restores connectivity", [[bad], [good]], 0, failover: true);
         await Case("failover still unavailable", [[bad], [bad]], 0, fails: true, failover: true);
 
+        async Task EnvironmentCase(bool useFailover, bool proxyOnline, bool environmentRecovers, int expectedAttempts)
+        {
+            int attempts = 0, rechecks = 0;
+            var proxyResult = new[] { proxyOnline ? good : bad };
+            bool expectSuccess = useFailover && proxyOnline && environmentRecovers;
+            try
+            {
+                var (inside, currentProxy) = await EnvironmentCheck.RunWithRecheckAsync(
+                    () => ++attempts == 2 && environmentRecovers
+                        ? Task.FromResult(new[] { good })
+                        : Task.FromException<ProbeResult[]>(new IOException("Dedicated DNS query failed")),
+                    () => { rechecks++; return Task.FromResult(proxyResult); },
+                    useFailover, _ => {}, default);
+                Check(expectSuccess && ReferenceEquals(currentProxy, proxyResult), "Unexpected environment recovery result");
+                ProxyHealth.RequireMatchingExit(currentProxy!, inside);
+            }
+            catch (IOException) when (!expectSuccess) { }
+            Check(attempts == expectedAttempts && rechecks == 1, "Environment retry did not respect the retry limit or proxy health");
+        }
+        await EnvironmentCase(true, true, true, 2);
+        await EnvironmentCase(true, true, false, 2);
+        await EnvironmentCase(true, false, true, 1);
+        await EnvironmentCase(false, true, true, 1);
+        Console.WriteLine("PASS: failover DNS startup recovery retries the protected environment once and still requires matching exits");
+
         int restarts = 0, probes = 0;
         var clock = new TestClock();
         var failed = new ProxyRecovery(_ => Task.CompletedTask,

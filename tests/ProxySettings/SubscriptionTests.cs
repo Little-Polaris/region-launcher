@@ -56,6 +56,15 @@ static class SubscriptionTests
         var groupPath = Path.Combine(folder, "failover-check.json");
         await ProxyConfiguration.ValidateAndSave(failover, groupPath, engine, true);
         ProxyConfiguration.ValidateRuntimePolicy(groupPath);
+        var runtime = (JsonObject)failover.DeepClone();
+        ProxyConfiguration.PrepareRuntime(runtime);
+        var resolvers = runtime["dns"]!["nameserver"]!.AsArray().Select(value => value!.GetValue<string>()).ToArray();
+        Assert(resolvers.SequenceEqual(["https://1.1.1.1/dns-query#RegionExit", "https://8.8.8.8/dns-query#RegionExit"]), "Failover DoH changed proxy routing");
+        Assert(failover["dns"]!["nameserver"]!.AsArray().Count == 1, "Saved config was changed");
+        await ProxyConfiguration.ValidateAndSave(runtime, Path.Combine(folder, "failover-runtime.json"), engine, true);
+        var fixedRuntime = (JsonObject)protectedConfig.DeepClone();
+        ProxyConfiguration.PrepareRuntime(fixedRuntime);
+        Assert(fixedRuntime["dns"]!["nameserver"]!.AsArray().Count == 1, "Fixed-node configuration changed");
         var savedGroup = ProxyConfiguration.ReadNode(File.ReadAllText(groupPath), out int port);
         Assert(port == 17911 && JsonNode.DeepEquals(failover, ProxyConfiguration.Build(savedGroup, port)), "Group round-trip or local port changed");
         Assert(failover["proxies"]![0]!["server"]!.GetValue<string>() == "192.0.2.2", "Import order lost");

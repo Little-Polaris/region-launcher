@@ -4,6 +4,25 @@ using System.Text.Json;
 
 static class EnvironmentCheck
 {
+    internal static async Task<(ProbeResult[] Inside, ProbeResult[]? ProxyRecheck)> RunWithRecheckAsync(
+        Func<Task<ProbeResult[]>> runInside, Func<Task<ProbeResult[]>> recheckProxy,
+        bool retryInside, Action<string> log, CancellationToken cancellationToken)
+    {
+        try { return (await runInside(), null); }
+        catch (IOException) when (!cancellationToken.IsCancellationRequested)
+        {
+            log("[故障复核] 环境检测失败，立即复查指定代理的实际联网，不重启代理。");
+            var recheck = await recheckProxy();
+            cancellationToken.ThrowIfCancellationRequested();
+            bool proxyOnline = recheck.Any(result => result.Ok);
+            log(proxyOnline ? "[故障复核] 指定代理仍有成功响应，请对照环境接管和专用 DNS 日志。" :
+                "[故障复核] 指定代理也全部失败，故障涉及代理或上游链路；本次目标程序未启动。");
+            if (!retryInside || !proxyOnline) throw;
+            log("[故障复核] 自动故障切换组仍可联网，复查一次环境接管和专用 DNS。");
+            return (await runInside(), recheck);
+        }
+    }
+
     public static async Task<ProbeResult[]> RunAsync(string bin, string data, int port, string dns, string? existingJob, Action<string> log, DiagnosticLog? diagnostics, CancellationToken cancellationToken = default)
     {
         string id = Guid.NewGuid().ToString("N"), folder = Path.Combine(data, "sessions", "check-" + id);

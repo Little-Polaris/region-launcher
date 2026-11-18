@@ -68,7 +68,7 @@ sealed class DedicatedProxy : IDisposable
             requestedPorts.RequireAvailable(log);
             var runtime = JsonNode.Parse(File.ReadAllText(config))!.AsObject();
             Register(runtime);
-            runtime["log-level"] = "info";
+            ProxyConfiguration.PrepareRuntime(runtime);
             runtimeConfig = Path.Combine(Path.GetDirectoryName(config)!, $"runtime-{Environment.ProcessId}.json");
             await File.WriteAllTextAsync(runtimeConfig, runtime.ToJsonString(), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
