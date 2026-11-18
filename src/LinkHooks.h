@@ -1,6 +1,7 @@
 #pragma once
 #include <shellapi.h>
 #include <stdio.h>
+#include <string_view>
 
 namespace LinkHooks {
 static std::wstring browser, profile, temporary, profileName, jobName;
@@ -13,7 +14,12 @@ inline std::wstring env(const wchar_t* name) {
     if (!n) return {};
     std::wstring value(n, 0); GetEnvironmentVariableW(name, value.data(), n); value.resize(wcslen(value.c_str())); return value;
 }
-inline bool web(const wchar_t* name) { return name && (!_wcsnicmp(name, L"https://", 8) || !_wcsnicmp(name, L"http://", 7)); }
+inline bool web(const wchar_t* name) {
+    if (!name) return false;
+    // Electron and other callers may pass the URL wrapped in a pair of quotes.
+    if (*name == L'"') ++name;
+    return !_wcsnicmp(name, L"https://", 8) || !_wcsnicmp(name, L"http://", 7);
+}
 inline std::wstring quote(const std::wstring& value) {
     std::wstring out = L"\""; size_t slashes = 0;
     for (auto c : value) {
@@ -47,6 +53,12 @@ inline BOOL open(SHELLEXECUTEINFOW* info) {
     info->hProcess = nullptr; info->hInstApp = (HINSTANCE)SE_ERR_ACCESSDENIED;
     if ((info->lpVerb && _wcsicmp(info->lpVerb, L"open") && _wcsicmp(info->lpVerb, L"opennew")) ||
         (info->lpParameters && *info->lpParameters) || !web(info->lpFile)) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    std::wstring_view url(info->lpFile);
+    if (url.front() == L'"') {
+        if (url.back() != L'"') { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+        url.remove_prefix(1);
+        url.remove_suffix(1);
+    }
     if (browser.empty() || temporary.empty()) { SetLastError(ERROR_FILE_NOT_FOUND); return FALSE; }
     // Serialize launcher-originated starts until Chromium publishes its singleton window.
     struct LaunchLock {
@@ -70,7 +82,7 @@ inline BOOL open(SHELLEXECUTEINFOW* info) {
         auto basename = browser.substr(browser.find_last_of(L"\\/") + 1);
         command += !_wcsicmp(basename.c_str(), L"msedge.exe") ? L" --inprivate" : L" --incognito";
     } else if (!profileName.empty()) command += L" " + quote(L"--profile-directory=" + profileName);
-    command += L" " + quote(info->lpFile);
+    command += L" " + quote(std::wstring(url));
     STARTUPINFOW si = {sizeof(si)}; si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_SHOWNORMAL;
     PROCESS_INFORMATION pi = {};
     auto cwd = browser.substr(0, browser.find_last_of(L"\\/"));

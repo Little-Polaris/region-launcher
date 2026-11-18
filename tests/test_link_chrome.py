@@ -59,7 +59,7 @@ def main():
         server = ThreadingHTTPServer(('127.0.0.1', 0), Page)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         port = server.server_port
-        args = subprocess.list2cmdline(['--twice', f'http://127.0.0.1:{port}/first', f'http://127.0.0.1:{port}/second'])
+        args = subprocess.list2cmdline(['--twice', f'http://127.0.0.1:{port}/first', f'"http://127.0.0.1:{port}/second"'])
         config = OUT / 'session.ini'
         config.write_text(f'''[session]
 Job={job}
@@ -92,7 +92,7 @@ LinkBrowser_TEMP={temporary}
         assert not temporary.parent.exists(), 'Session did not remove its temporary profiles'
         assert (saved / 'keep.txt').read_text() == 'preserve', 'Saved data was changed'
     (OUT / 'result.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
-    print('PASS: actual Chrome receives both URLs in same scoped process, saved/temporary/foreign cases, session cleanup preserves saved data')
+    print('PASS: actual Chrome receives plain and quoted URLs in the same scoped process; session cleanup preserves saved data')
 
 
 if __name__ == '__main__': main()

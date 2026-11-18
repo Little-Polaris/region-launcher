@@ -20,15 +20,18 @@ def main():
         browser = OUT / name
         shutil.copy2(ROOT / 'build/LinkProbe.exe', browser)
         for api in ('w', 'a', 'exw', 'exa'):
-            for kind in ('saved', 'temporary', 'foreign', 'inside'):
+            for kind in ('saved', 'temporary', 'foreign', 'inside', 'quoted'):
                 owner = None
                 if kind == 'foreign':
                     owner = subprocess.Popen([str(browser), '--owner', str(saved)], stdout=subprocess.PIPE, text=True)
                     assert owner.stdout.readline().strip() == 'OWNER_READY'
                 try:
                     url = 'https://example.invalid/oauth?code=test&value="quoted"'
+                    if kind == 'quoted':
+                        url = 'https://example.invalid/oauth?code=test&value=%22quoted%22'
+                    target = f'"{url}"' if kind == 'quoted' else url
                     config = OUT / 'session.ini'
-                    arguments = (['--inside-owner', str(saved)] if kind == 'inside' else []) + [api, url]
+                    arguments = (['--inside-owner', str(saved)] if kind == 'inside' else []) + [api, target]
                     config.write_text(f'''[session]
 Job=Local\\RegionLauncher.{uuid.uuid4().hex}
 Application={ROOT / 'build/LinkProbe.exe'}
@@ -44,12 +47,14 @@ LinkBrowser_PROFILE={saved if kind != 'temporary' else ''}
 LinkBrowser_PROFILE_NAME=Profile 2
 LinkBrowser_TEMP={temp}
 ''', encoding='utf-16')
+                    output = Path(env['LINK_TEST_OUTPUT'])
+                    output.unlink(missing_ok=True)
                     result = subprocess.run([str(BIN / 'RegionSession.exe'), '--locale-test', str(config)], env=env, capture_output=True, text=True, timeout=25)
                     assert result.returncode == 0, result.stdout + result.stderr
-                    args = Path(env['LINK_TEST_OUTPUT']).read_text(encoding='utf-8-sig').splitlines()
+                    args = output.read_text(encoding='utf-8-sig').splitlines()
                     assert args[:2] == ['locale=en-US', 'inside=1'], args
                     assert args[-1] == url, args
-                    reused = kind in ('saved', 'inside')
+                    reused = kind in ('saved', 'inside', 'quoted')
                     assert '--user-data-dir=' + str(saved if reused else temp) in args, args
                     private = '--inprivate' if name == 'msedge.exe' else '--incognito'
                     assert (private in args) == (not reused), args
@@ -61,7 +66,7 @@ LinkBrowser_TEMP={temp}
         config.write_text(config.read_text(encoding='utf-16').replace(str(browser), str(OUT / 'missing.exe')), encoding='utf-16')
         missing = subprocess.run([str(BIN / 'RegionSession.exe'), '--locale-test', str(config)], env=env, capture_output=True, text=True, timeout=20)
         assert missing.returncode != 0 and 'no external fallback' in missing.stderr, missing
-    print('PASS: Chrome/Edge arguments; four Shell APIs; Unicode paths; saved/temporary/foreign profiles; scoped child; missing browser fails closed; URL not logged')
+    print('PASS: Chrome/Edge arguments; four Shell APIs; quoted URLs; Unicode paths; saved/temporary/foreign profiles; scoped child; missing browser fails closed; URL not logged')
 
 
 if __name__ == '__main__': main()
