@@ -48,6 +48,18 @@ sealed class DiagnosticLog : IDisposable
             return line;
         }
     }
+    internal string ReadTail()
+    {
+        lock (sync) {
+            if (writer?.BaseStream is not FileStream current) return "";
+            using var file = new FileStream(current.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long start = Math.Max(0, file.Length - 128 * 1024);
+            file.Position = start;
+            using var reader = new StreamReader(file, Encoding.UTF8);
+            if (start != 0) reader.ReadLine();
+            return reader.ReadToEnd();
+        }
+    }
     public void CaptureNetworkLog(string label, string? path = null)
     {
         try {

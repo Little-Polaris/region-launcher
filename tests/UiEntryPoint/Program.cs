@@ -58,7 +58,7 @@ void Snapshot(System.Windows.Forms.Form form, string name) {
     bitmap.Save(Path.Combine(args[1], name));
 }
 Directory.CreateDirectory(fixture);
-File.WriteAllText(Path.Combine(fixture, "profile.json"), JsonSerializer.Serialize(new { Application = Environment.ProcessPath!, Arguments = "--legacy=\"中文 参数\"" }));
+File.WriteAllText(Path.Combine(fixture, "profile.json"), JsonSerializer.Serialize(new { Application = Path.ChangeExtension(Path.GetFullPath(args[0]), ".exe"), Arguments = "--legacy=\"中文 参数\"" }));
 object OpenLauncher() => Activator.CreateInstance(assembly.GetType("Launcher")!, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { fixture }, null)!;
 var ui = new Thread(() =>
 {
@@ -82,11 +82,26 @@ var ui = new Thread(() =>
         T Property<T>(object item, string name) => (T)item.GetType().GetProperty(name)!.GetValue(item)!;
         T Field<T>(object instance, string name) => (T)instance.GetType().GetField(name, flags)!.GetValue(instance)!;
         if (tiles.Controls.Count != 2 || Property<string>(Entry(0), "Arguments") != "--legacy=\"中文 参数\"" ||
-            Tile(1).Text != "添加程序" || Tile(0).Image is not { Width: >= 48 } || Tile(0).ContextMenuStrip?.Items.Count != 2)
-            throw new Exception("Legacy entry or tile actions missing");
+            Tile(1).Text != "添加程序" || Tile(0).Image is not { Width: >= 48 } || Tile(0).ContextMenuStrip?.Items.Count != 5)
+            throw new Exception($"Legacy entry or tile actions missing: tiles={tiles.Controls.Count}, icon={Tile(0).Image?.Size}, actions={Tile(0).ContextMenuStrip?.Items.Count}");
         if (form.Controls.OfType<TextBox>().Any() ||
             !Field<ContextMenuStrip>(form, "actions").Items.Cast<ToolStripItem>().Any(item => item.Text == "打开日志"))
             throw new Exception("Logs must remain available from the menu");
+        var status = Field<Label>(form, "homeStatus");
+        if (!status.Text.Contains("1 个程序") || !Tile(0).AccessibleDescription!.Contains("US · en-US") ||
+            Field<Button>(form, "footer").Text != "查看运行日志") throw new Exception("Home card and status unavailable");
+        var drag = form.GetType().GetMethod("DroppedExecutable", BindingFlags.Static | BindingFlags.NonPublic)!;
+        object Drop(params string[] paths) => drag.Invoke(null, new object[] {
+            new DragEventArgs(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, DragDropEffects.Copy, DragDropEffects.None) });
+        if (!Equals(Drop(Environment.ProcessPath!), Environment.ProcessPath) || Drop("relative.exe") != null ||
+            Drop(Path.ChangeExtension(Environment.ProcessPath!, ".txt")) != null || Drop(Environment.ProcessPath!, Environment.ProcessPath!) != null)
+            throw new Exception("Dropped file validation failed");
+        var diagnostics = Field<object>(form, "diagnostics");
+        var tail = (string)diagnostics.GetType().GetMethod("ReadTail", flags)!.Invoke(diagnostics, null)!;
+        if (!tail.Contains("启动器版本 ") || !tail.Contains("请在右上角菜单选择")) throw new Exception("Run log does not expose the current diagnostic file");
+        using (var log = (Form)form.GetType().GetMethod("CreateRunLog", flags)!.Invoke(form, null)!) {
+            if (!log.Controls.OfType<TextBox>().Single().Text.Contains("启动器版本 ")) throw new Exception("Log dialog is not wired to diagnostics");
+        }
         var editorType = assembly.GetType("ApplicationEditor")!;
         foreach (float fontSize in new[] { 10f, 15f, 20f }) {
             using var layoutEditor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null, null })!;
@@ -156,7 +171,7 @@ var ui = new Thread(() =>
         Snapshot(form, "software-launcher.png");
         var originalSize = form.Size;
         form.Size = form.MinimumSize; Application.DoEvents();
-        if (Tile(2).Top <= Tile(0).Top || !tiles.AutoScroll)
+        if (Tile(2).Top <= Tile(0).Top || !tiles.AutoScroll || !tiles.AllowDrop)
             throw new Exception("Cards cannot wrap or scroll in a narrow window");
         form.Size = originalSize; Application.DoEvents();
         using (var reopened = (Form)OpenLauncher()) {
@@ -176,9 +191,9 @@ var ui = new Thread(() =>
         if (!Tile(0).Enabled) throw new Exception("Idle launch state incorrect");
         using var dummySession = new System.Diagnostics.Process();
         session.SetValue(form, dummySession); update.Invoke(form, null);
-        if (!Tile(0).Enabled) throw new Exception("Existing environment must accept another program");
+        if (!Tile(0).Enabled || !status.Text.Contains("环境运行中")) throw new Exception("Existing environment must accept another program");
         preparing.SetValue(form, true); update.Invoke(form, null);
-        if (tiles.Controls.Cast<Control>().Any(control => control.Enabled)) throw new Exception("Preparing must disable app and add tiles");
+        if (!status.Text.Contains("正在准备") || tiles.Controls.Cast<Control>().Any(control => control.Enabled)) throw new Exception("Preparing must disable app and add tiles");
         session.SetValue(form, null); preparing.SetValue(form, false); update.Invoke(form, null);
         LaunchFailureTests.CheckTile(form, Tile(1), fixture);
         var empty = Activator.CreateInstance(assembly.GetType("ApplicationList")!)!;

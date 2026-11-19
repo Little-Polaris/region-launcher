@@ -42,7 +42,12 @@ sealed class Profile
 
 sealed class Launcher : Form
 {
-    readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new(24, 12, 24, 24) };
+    readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, AllowDrop = true, Padding = new(20, 8, 20, 20) };
+    readonly Label homeStatus = new() { Dock = DockStyle.Fill, AutoEllipsis = true, ForeColor = HomeTheme.Muted };
+    readonly Button footer = new() { Text = "查看运行日志", AccessibleName = "查看运行日志", Dock = DockStyle.Bottom, Height = 32,
+        FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(234, 236, 241), ForeColor = HomeTheme.Muted,
+        TextAlign = ContentAlignment.MiddleLeft, Padding = new(22, 0, 0, 0), Cursor = Cursors.Hand };
+    string? launchingId;
     readonly ContextMenuStrip actions = new();
     readonly ToolStripMenuItem configureProxy = new("独立代理配置…");
     readonly ToolStripMenuItem switchProxy = new("切换节点…");
@@ -76,25 +81,35 @@ sealed class Launcher : Form
         dedicatedProxy = new(Append, values => diagnostics?.AddSecrets(values));
         proxyRecovery = new(dedicatedProxy.EnsureStarted, dedicatedProxy.ReconnectAsync,
             ct => ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: ct), Append);
-        Text = "Region Launcher"; ClientSize = new(720, 416); MinimumSize = new(370, 280);
+        Text = "Region Launcher"; ClientSize = new(820, 560); MinimumSize = new(480, 390);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        BackColor = Color.FromArgb(245, 247, 250);
-        var header = new Panel { Dock = DockStyle.Top, Height = 72, Padding = new(30, 16, 30, 12) };
-        var title = new Label {
-            Text = "应用", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
-            Font = new(Font.FontFamily, 19, FontStyle.Bold), ForeColor = Color.FromArgb(28, 39, 60)
-        };
-        var more = new Button {
-            Text = "⋯", AccessibleName = "设置与工具", Dock = DockStyle.Right, Width = 44, Cursor = Cursors.Hand,
-            FlatStyle = FlatStyle.Flat, Font = new("Segoe UI", 18), ForeColor = title.ForeColor, BackColor = Color.White
-        };
-        more.FlatAppearance.BorderColor = Color.FromArgb(222, 228, 238);
-        more.Click += (_, _) => actions.Show(more, new Point(more.Width, more.Height + 4), ToolStripDropDownDirection.BelowLeft);
-        header.Controls.Add(title); header.Controls.Add(more);
-        Controls.Add(tiles); Controls.Add(header);
+        AutoScaleMode = AutoScaleMode.Dpi; BackColor = HomeTheme.Background;
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, Height = 84, Padding = new(28, 16, 28, 4), ColumnCount = 2, RowCount = 2 };
+        header.ColumnStyles.Add(new(SizeType.Percent, 100)); header.ColumnStyles.Add(new(SizeType.AutoSize));
+        header.RowStyles.Add(new(SizeType.Percent, 60)); header.RowStyles.Add(new(SizeType.Percent, 40));
+        var title = new Label { Text = "Region Launcher", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+            Font = new(Font.FontFamily, 16, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
+        var quick = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+        var check = HomeTheme.Action("检测并修复"); check.Click += (_, _) => checkProxy.PerformClick();
+        var node = HomeTheme.Action("切换节点"); node.Click += (_, _) => switchProxy.PerformClick();
+        checkProxy.EnabledChanged += (_, _) => check.Enabled = checkProxy.Enabled;
+        switchProxy.EnabledChanged += (_, _) => node.Enabled = switchProxy.Enabled;
+        var more = HomeTheme.Action("更多 ▾"); more.AccessibleName = "更多设置与工具";
+        more.Click += (_, _) => actions.Show(more, new Point(more.Width, more.Height + 2), ToolStripDropDownDirection.BelowLeft);
+        quick.Controls.AddRange([check, node, more]);
+        header.Controls.Add(title, 0, 0); header.Controls.Add(quick, 1, 0);
+        header.Controls.Add(homeStatus, 0, 1); header.SetColumnSpan(homeStatus, 2);
+        footer.FlatAppearance.BorderSize = 0;
+        footer.Click += (_, _) => ShowRunLog();
+        Controls.Add(tiles); Controls.Add(footer); Controls.Add(header);
         var openLogs = new ToolStripMenuItem("打开日志", null, (_, _) => OpenLogs());
-        actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, openLogs]);
+        var showLog = new ToolStripMenuItem("查看运行日志", null, (_, _) => ShowRunLog());
+        actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, showLog, openLogs]);
+        tiles.DragEnter += (_, e) => e.Effect = tiles.Enabled && DroppedExecutable(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
+        tiles.DragDrop += (_, e) => {
+            if (tiles.Enabled && DroppedExecutable(e) is string file)
+                EditSoftware(new LaunchApplication { Name = Path.GetFileNameWithoutExtension(file), Application = file, Environment = DefaultEnvironment }, adding: true);
+        };
         checkProxy.Click += async (_, _) => await TrackOperation(async () => {
             if (!BeginPreparation(out long operation)) return;
             try { var result = await CheckProxy(); NotifyCheckResult(result.Recovered, result.Detail, null); }
@@ -148,6 +163,34 @@ sealed class Launcher : Form
         Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
         if (logError != null) Shown += (_, _) => MessageBox.Show(this, logError, "日志文件不可写", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
+    internal static string? DroppedExecutable(DragEventArgs e) =>
+        e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files &&
+        Path.IsPathFullyQualified(files[0]) && files[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? files[0] : null;
+
+    void ShowRunLog()
+    {
+        using var dialog = CreateRunLog();
+        dialog.ShowDialog(this);
+    }
+    internal Form CreateRunLog()
+    {
+        var dialog = new Form { Text = "运行日志", Font = Font, ClientSize = new(760, 450), MinimumSize = new(400, 280),
+            StartPosition = FormStartPosition.CenterParent, Icon = windowIcon, ShowInTaskbar = false };
+        var log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false };
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new(8) };
+        var refresh = HomeTheme.Action("刷新");
+        void LoadTail()
+        {
+            try { log.Text = diagnostics?.ReadTail() ?? "当前运行日志不可用。"; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log.Text = "读取日志失败：" + ex.Message; }
+            log.SelectionStart = log.TextLength; log.ScrollToCaret();
+        }
+        refresh.Click += (_, _) => LoadTail();
+        var folder = HomeTheme.Action("打开日志文件夹"); folder.Click += (_, _) => OpenLogs();
+        buttons.Controls.AddRange([refresh, folder]);
+        dialog.Controls.Add(log); dialog.Controls.Add(buttons); LoadTail();
+        return dialog;
+    }
     void OpenLogs()
     {
         try {
@@ -198,6 +241,10 @@ sealed class Launcher : Form
         switchProxy.Enabled = !preparing && dedicatedProxy.Configured;
         linkBrowser.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;
+        foreach (var tile in tiles.Controls.OfType<ApplicationTile>())
+            tile.SetBusy(preparing && launchingId != null && launchingId == (tile.Tag as LaunchApplication)?.Id);
+        homeStatus.Text = applicationList == null ? "软件列表读取失败 · 请查看运行日志" :
+            $"{applicationList.Applications.Count} 个程序  ·  {(dedicatedProxy.Configured ? "代理已配置" : "代理未配置")}  ·  {(preparing ? "正在准备…" : session != null ? "环境运行中" : "就绪")}";
     }
 
     async Task SwitchProxyAsync()
@@ -220,15 +267,15 @@ sealed class Launcher : Form
         }
         finally { EndPreparation(operation); }
     }
-    bool BeginPreparation(out long operation)
+    bool BeginPreparation(out long operation, string? applicationId = null)
     {
         operation = 0;
         if (preparing || exiting) return false;
-        operation = ++preparationId; preparing = true; UpdateActions(); return true;
+        operation = ++preparationId; preparing = true; launchingId = applicationId; UpdateActions(); return true;
     }
     void EndPreparation(long operation)
     {
-        if (operation == preparationId) preparing = false;
+        if (operation == preparationId) { preparing = false; launchingId = null; }
         UpdateActions();
     }
     LaunchEnvironment DefaultEnvironment =>
@@ -244,7 +291,10 @@ sealed class Launcher : Form
                     var tile = new ApplicationTile(entry);
                     tile.Click += async (_, _) => await TrackOperation(() => StartSession(entry));
                     var menu = new ContextMenuStrip();
-                    menu.Items.Add("编辑软件…", null, (_, _) => EditSoftware(entry));
+                    menu.Items.Add("启动", null, async (_, _) => await TrackOperation(() => StartSession(entry)));
+                    menu.Items.Add("编辑程序与地区…", null, (_, _) => EditSoftware(entry));
+                    menu.Items.Add("打开所在文件夹", null, (_, _) => RevealApplication(entry));
+                    menu.Items.Add(new ToolStripSeparator());
                     menu.Items.Add("删除软件…", null, (_, _) => RemoveSoftware(entry));
                     tile.ContextMenuStrip = menu;
                     tiles.Controls.Add(tile);
@@ -256,10 +306,10 @@ sealed class Launcher : Form
         } finally { tiles.ResumeLayout(); }
         UpdateActions();
     }
-    void EditSoftware(LaunchApplication? entry)
+    void EditSoftware(LaunchApplication? entry, bool adding = false)
     {
         if (preparing || applicationList == null) return;
-        using var dialog = new ApplicationEditor(entry, DefaultEnvironment);
+        using var dialog = new ApplicationEditor(entry, DefaultEnvironment, adding);
         if (dialog.ShowDialog(this) == DialogResult.OK) SaveSoftware(dialog.Entry!);
     }
     void SaveSoftware(LaunchApplication entry)
@@ -274,6 +324,17 @@ sealed class Launcher : Form
     {
         try { library.Save(updated); applicationList = updated; RefreshSoftware(); }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存软件列表", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+    void RevealApplication(LaunchApplication entry)
+    {
+        try {
+            string path = ApplicationLibrary.ResolvePath(entry.Application);
+            if (!File.Exists(path)) throw new FileNotFoundException("程序不存在，请先编辑程序路径。");
+            using var process = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        } catch (Exception ex) {
+            Append("无法打开所在文件夹：" + ex.Message);
+            MessageBox.Show(this, ex.Message, "无法打开所在文件夹", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
     void RemoveSoftware(LaunchApplication entry)
     {
@@ -324,7 +385,7 @@ sealed class Launcher : Form
     }
     async Task StartSession(LaunchApplication selected)
     {
-        if (!BeginPreparation(out long operation)) return;
+        if (!BeginPreparation(out long operation, selected.Id)) return;
         bool join = session != null;
         try
         {

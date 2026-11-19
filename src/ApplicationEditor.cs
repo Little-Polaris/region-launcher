@@ -11,10 +11,11 @@ sealed class ApplicationEditor : Form
     readonly string id;
     public LaunchApplication? Entry { get; private set; }
 
-    public ApplicationEditor(LaunchApplication? entry = null, LaunchEnvironment? defaults = null)
+    public ApplicationEditor(LaunchApplication? entry = null, LaunchEnvironment? defaults = null) : this(entry, defaults, false) { }
+    internal ApplicationEditor(LaunchApplication? entry, LaunchEnvironment? defaults, bool adding)
     {
         id = entry?.Id ?? Guid.NewGuid().ToString("N");
-        Text = entry == null ? "添加软件" : "编辑软件";
+        Text = entry == null || adding ? "添加软件" : "编辑软件";
         Font = new("Microsoft YaHei UI", 10); ClientSize = new(740, 440); MinimumSize = new(680, 360);
         StartPosition = FormStartPosition.CenterParent; MinimizeBox = MaximizeBox = false;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
