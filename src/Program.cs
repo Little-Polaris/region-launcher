@@ -43,10 +43,10 @@ sealed class Profile
 sealed class Launcher : Form
 {
     readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, AllowDrop = true, Padding = new(20, 8, 20, 20) };
-    readonly Label homeStatus = new() { Dock = DockStyle.Fill, AutoEllipsis = true, ForeColor = HomeTheme.Muted };
-    readonly Button footer = new() { Text = "查看运行日志", AccessibleName = "查看运行日志", Dock = DockStyle.Bottom, Height = 32,
+    readonly Label homeStatus = new() { Dock = DockStyle.Fill, AutoSize = true, AutoEllipsis = true, ForeColor = HomeTheme.Muted };
+    readonly Button footer = new() { Text = "查看运行日志", AccessibleName = "查看运行日志", Dock = DockStyle.Bottom, AutoSize = true,
         FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(234, 236, 241), ForeColor = HomeTheme.Muted,
-        TextAlign = ContentAlignment.MiddleLeft, Padding = new(22, 0, 0, 0), Cursor = Cursors.Hand };
+        TextAlign = ContentAlignment.MiddleLeft, Padding = new(22, 5, 0, 5), Cursor = Cursors.Hand };
     string? launchingId;
     readonly ContextMenuStrip actions = new();
     readonly ToolStripMenuItem configureProxy = new("独立代理配置…");
@@ -81,13 +81,13 @@ sealed class Launcher : Form
         dedicatedProxy = new(Append, values => diagnostics?.AddSecrets(values));
         proxyRecovery = new(dedicatedProxy.EnsureStarted, dedicatedProxy.ReconnectAsync,
             ct => ProxyHealth.ProbeAsync(dedicatedProxy.Port, s => Append("[指定代理] " + s), cancellationToken: ct), Append);
-        Text = "Region Launcher"; ClientSize = new(820, 560); MinimumSize = new(480, 390);
+        Text = "Region Launcher"; ClientSize = new(820, 560); MinimumSize = new(410, 390);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleMode = AutoScaleMode.Dpi; BackColor = HomeTheme.Background;
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, Height = 84, Padding = new(28, 16, 28, 4), ColumnCount = 2, RowCount = 2 };
+        AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi; BackColor = HomeTheme.Background;
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(24, 12, 24, 6), ColumnCount = 2, RowCount = 3 };
         header.ColumnStyles.Add(new(SizeType.Percent, 100)); header.ColumnStyles.Add(new(SizeType.AutoSize));
-        header.RowStyles.Add(new(SizeType.Percent, 60)); header.RowStyles.Add(new(SizeType.Percent, 40));
-        var title = new Label { Text = "Region Launcher", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft,
+        for (int row = 0; row < 3; row++) header.RowStyles.Add(new(SizeType.AutoSize));
+        var title = new Label { Text = "Region Launcher", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft,
             Font = new(Font.FontFamily, 16, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
         var quick = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
         var check = HomeTheme.Action("检测并修复"); check.Click += (_, _) => checkProxy.PerformClick();
@@ -99,6 +99,18 @@ sealed class Launcher : Form
         quick.Controls.AddRange([check, node, more]);
         header.Controls.Add(title, 0, 0); header.Controls.Add(quick, 1, 0);
         header.Controls.Add(homeStatus, 0, 1); header.SetColumnSpan(homeStatus, 2);
+        void FitHeader()
+        {
+            bool narrow = header.ClientSize.Width - header.Padding.Horizontal < title.PreferredWidth + quick.PreferredSize.Width + LogicalToDeviceUnits(12);
+            if ((header.GetRow(quick) == 2) == narrow) return;
+            header.SuspendLayout();
+            header.SetCellPosition(quick, narrow ? new TableLayoutPanelCellPosition(0, 2) : new TableLayoutPanelCellPosition(1, 0));
+            header.SetColumnSpan(quick, narrow ? 2 : 1);
+            header.ResumeLayout(true);
+        }
+        header.SizeChanged += (_, _) => FitHeader();
+        quick.SizeChanged += (_, _) => FitHeader();
+        title.FontChanged += (_, _) => FitHeader();
         footer.FlatAppearance.BorderSize = 0;
         footer.Click += (_, _) => ShowRunLog();
         Controls.Add(tiles); Controls.Add(footer); Controls.Add(header);
@@ -163,6 +175,17 @@ sealed class Launcher : Form
         Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
         if (logError != null) Shown += (_, _) => MessageBox.Show(this, logError, "日志文件不可写", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
+    protected override void OnLoad(EventArgs e)
+    {
+        var work = Screen.FromControl(this).WorkingArea;
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, work.Width), Math.Min(MinimumSize.Height, work.Height));
+        if (Width > work.Width || Height > work.Height) {
+            Size = new Size(Math.Min(Width, work.Width), Math.Min(Height, work.Height));
+            Location = new Point(work.Left + (work.Width - Width) / 2, work.Top + (work.Height - Height) / 2);
+        }
+        base.OnLoad(e);
+    }
+
     internal static string? DroppedExecutable(DragEventArgs e) =>
         e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files &&
         Path.IsPathFullyQualified(files[0]) && files[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? files[0] : null;

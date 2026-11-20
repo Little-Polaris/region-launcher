@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 
 // A fixture failure must reach the test runner, never leave a desktop error dialog.
+System.Windows.Forms.Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException, false);
 
 if (args.Length == 2 && args[0] == "--launch-result") {
@@ -168,12 +169,40 @@ var ui = new Thread(() =>
             SearchComboTests.Run(Field<ComboBox>(editor, "country"), Field<ComboBox>(editor, "language"), Field<ComboBox>(editor, "timeZone"),
                 Path.Combine(fixture, "applications.json"));
         }
+        var contentBounds = Tile(0).GetType().GetMethod("ContentBounds", BindingFlags.Static | BindingFlags.NonPublic)!;
+        foreach (int dpi in new[] { 96, 120, 144, 192, 240 }) {
+            foreach (bool constrained in new[] { false, true }) {
+                int S(int n) => n * dpi / 96;
+                var size = new System.Drawing.Size(S(142), constrained ? 142 : S(142));
+                if (size.Height < S(73)) continue;
+                var (icon, nameBox, subtitle) = ((System.Drawing.Rectangle, System.Drawing.Rectangle, System.Drawing.Rectangle))
+                    contentBounds.Invoke(null, new object[] { size, dpi, S(20), S(17) })!;
+                var card = new System.Drawing.Rectangle(System.Drawing.Point.Empty, size);
+                if (!card.Contains(nameBox) || !card.Contains(subtitle) || icon.Bottom > nameBox.Top ||
+                    nameBox.Bottom > subtitle.Top || subtitle.Bottom >= size.Height || icon.Width > S(48))
+                    throw new Exception($"Card text is clipped or obscured at {dpi} DPI (size {size})");
+            }
+        }
         Snapshot(form, "software-launcher.png");
         var originalSize = form.Size;
         form.Size = form.MinimumSize; Application.DoEvents();
         if (Tile(2).Top <= Tile(0).Top || !tiles.AutoScroll || !tiles.AllowDrop)
             throw new Exception("Cards cannot wrap or scroll in a narrow window");
+        var header = form.Controls.OfType<TableLayoutPanel>().Single();
+        var quick = header.Controls.OfType<FlowLayoutPanel>().Single();
+        var title = header.Controls.OfType<Label>().Single(label => label.Text == "Region Launcher");
+        using (var largerFont = new System.Drawing.Font(form.Font.FontFamily, 16f)) {
+            form.Font = largerFont;
+            Application.DoEvents();
+            if (header.GetRow(quick) != 2 || !header.ClientRectangle.Contains(quick.Bounds) ||
+                title.Bounds.IntersectsWith(quick.Bounds) || !tiles.ClientRectangle.Contains(Tile(0).Bounds) ||
+                Tile(0).Size != Tile(0).GetPreferredSize(System.Drawing.Size.Empty))
+                throw new Exception("Compact window did not adapt to larger fonts");
+            Snapshot(form, "software-launcher-large-font.png");
+            form.Font = new System.Drawing.Font(largerFont.FontFamily, 10f);
+        }
         form.Size = originalSize; Application.DoEvents();
+        Console.WriteLine($"PASS: card layout at 100%-250%, including constrained cards and larger fonts on a {form.DeviceDpi} DPI desktop");
         using (var reopened = (Form)OpenLauncher()) {
             var restored = Tiles(reopened);
             var settings = Property<object>(restored.Controls[1].Tag!, "Environment");

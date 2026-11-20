@@ -44,13 +44,49 @@ sealed class ApplicationTile : Button
             : "添加程序";
         AccessibleName = Text;
         AccessibleDescription = entry == null ? "打开添加程序窗口" : $"按保存的设置启动（{subtitle}）。右键可编辑或删除。";
-        Tag = entry; Size = new(132, 142); Margin = new(8);
+        Tag = entry; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; Margin = new(8);
         FlatStyle = FlatStyle.Flat;
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         BackColor = HomeTheme.Background;
         UseMnemonic = false;
         Cursor = Cursors.Hand;
         if (entry != null) Image = LoadIcon(entry.Application);
+    }
+
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        int dpi = DeviceDpi;
+        return new Size(LogicalToDeviceUnits(142),
+            LogicalToDeviceUnits(92) + LineHeight(Font, dpi) + LineHeight(SubtitlePoints, dpi));
+    }
+
+    float SubtitlePoints => Math.Max(8f, Font.SizeInPoints - 1.5f);
+    static int LineHeight(Font font, int dpi) => (int)Math.Ceiling(font.GetHeight(dpi)) + 2;
+    int LineHeight(float points, int dpi)
+    {
+        using var font = new Font(Font.FontFamily, points, FontStyle.Regular, GraphicsUnit.Point);
+        return LineHeight(font, dpi);
+    }
+
+    // Reserve both text rows before sizing the icon; a constrained window shrinks the icon first.
+    internal static (Rectangle Icon, Rectangle Name, Rectangle Subtitle) ContentBounds(Size size, int dpi, int nameHeight, int subtitleHeight)
+    {
+        int S(int n) => (int)Math.Round(n * dpi / 96f);
+        int inset = S(8), bottom = S(10), gap = S(2);
+        int textWidth = Math.Max(0, size.Width - 2 * inset);
+        var subtitle = new Rectangle(inset, size.Height - bottom - subtitleHeight, textWidth, subtitleHeight);
+        var name = new Rectangle(inset, subtitle.Top - gap - nameHeight, textWidth, nameHeight);
+        int top = S(10);
+        int available = Math.Max(0, name.Top - top - S(6));
+        int iconSize = Math.Min(S(48), Math.Min(available, textWidth));
+        return (new Rectangle((size.Width - iconSize) / 2, top + (available - iconSize) / 2, iconSize, iconSize), name, subtitle);
+    }
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        Parent?.PerformLayout(this, nameof(PreferredSize));
+        Invalidate();
     }
 
     public void SetBusy(bool value)
@@ -99,28 +135,29 @@ sealed class ApplicationTile : Button
         using var border = new Pen(focus || busy ? HomeTheme.Accent : highlighted ? Color.FromArgb(120, 160, 235) : HomeTheme.Border);
         if (Tag == null && !highlighted) border.DashStyle = DashStyle.Dash;
         graphics.DrawPath(border, path);
-        var iconBox = new Rectangle((Width - S(56)) / 2, S(20), S(56), S(56));
+        using var small = new Font(Font.FontFamily, SubtitlePoints, FontStyle.Regular, GraphicsUnit.Point);
+        var (iconBox, nameBox, subtitleBox) = ContentBounds(ClientSize, DeviceDpi, LineHeight(Font, DeviceDpi), LineHeight(small, DeviceDpi));
         const TextFormatFlags centered = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
             TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-        if (Tag == null) {
+        if (iconBox.Width >= S(8) && Tag == null) {
             using var pen = new Pen(Enabled ? HomeTheme.Accent : HomeTheme.Muted, S(3)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             int x = iconBox.X + iconBox.Width / 2, y = iconBox.Y + iconBox.Height / 2;
-            graphics.DrawLine(pen, x - S(14), y, x + S(14), y);
-            graphics.DrawLine(pen, x, y - S(14), x, y + S(14));
-        } else if (Image != null) {
+            int arm = Math.Min(S(13), iconBox.Width / 3);
+            graphics.DrawLine(pen, x - arm, y, x + arm, y);
+            graphics.DrawLine(pen, x, y - arm, x, y + arm);
+        } else if (iconBox.Width > 0 && Image != null) {
             graphics.DrawImage(Image, iconBox);
-        } else {
-            using var avatar = HomeTheme.Rounded(iconBox, S(14));
+        } else if (iconBox.Width >= S(12) && Tag != null) {
+            using var avatar = HomeTheme.Rounded(iconBox, Math.Min(S(12), iconBox.Width / 2));
             using var brush = new SolidBrush(Avatars[(uint)Text.GetHashCode(StringComparison.Ordinal) % Avatars.Length]);
             graphics.FillPath(brush, avatar);
             string letter = Text.Length == 0 ? "?" : StringInfo.GetNextTextElement(Text).ToUpperInvariant();
-            using var big = new Font(Font.FontFamily, 22, FontStyle.Bold);
+            using var big = new Font(Font.FontFamily, Math.Min(20f, iconBox.Width * 48f / DeviceDpi), FontStyle.Bold);
             TextRenderer.DrawText(graphics, letter, big, iconBox, Color.White, centered);
         }
-        TextRenderer.DrawText(graphics, Tag == null ? "添加" : Text, Font, new Rectangle(S(8), S(84), Width - S(16), S(24)),
+        TextRenderer.DrawText(graphics, Tag == null ? "添加" : Text, Font, nameBox,
             Enabled || busy ? HomeTheme.Text : HomeTheme.Muted, centered);
-        using var small = new Font(Font.FontFamily, Math.Max(7f, Font.Size - 2f));
-        TextRenderer.DrawText(graphics, busy ? "启动中…" : subtitle, small, new Rectangle(S(8), S(108), Width - S(16), S(20)),
+        TextRenderer.DrawText(graphics, busy ? "启动中…" : subtitle, small, subtitleBox,
             busy ? HomeTheme.Accent : HomeTheme.Muted, centered);
     }
 
