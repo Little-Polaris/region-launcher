@@ -54,7 +54,8 @@ sealed class ApplicationLibrary(string path)
             File.Move(temporary, path, true);
         } finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    public static string ResolvePath(string application) => System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(application), AppContext.BaseDirectory);
+    static string NormalizePath(string application) => System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(application), AppContext.BaseDirectory);
+    public static string ResolvePath(string application) => PackageExecutable.Resolve(NormalizePath(application));
     public static void ValidateEntry(LaunchApplication entry)
     {
         entry.Environment?.Validate();
@@ -62,7 +63,7 @@ sealed class ApplicationLibrary(string path)
             throw new InvalidDataException("软件需要名称、程序路径和有效的启动参数字段。");
         foreach (string text in new[] { entry.Id, entry.Name, entry.Application, entry.Arguments })
             if (text.IndexOfAny(['\r', '\n', '\0']) >= 0) throw new InvalidDataException("软件配置不能包含换行符或空字符。");
-        if (!System.IO.Path.GetExtension(ResolvePath(entry.Application)).Equals(".exe", StringComparison.OrdinalIgnoreCase))
+        if (!System.IO.Path.GetExtension(NormalizePath(entry.Application)).Equals(".exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("请选择 Windows .exe 程序。");
     }
     static void Validate(ApplicationList value)

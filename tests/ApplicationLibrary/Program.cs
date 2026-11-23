@@ -40,6 +40,27 @@ try { store.Load(legacy, arguments); throw new Exception("Malformed file accepte
 if (File.ReadAllText(path) != "{broken original config") throw new Exception("Malformed source overwritten");
 if (ApplicationLibrary.ResolvePath("%SystemRoot%\\System32\\cmd.exe") != Path.Combine(Environment.GetEnvironmentVariable("SystemRoot")!, "System32", "cmd.exe"))
     throw new Exception("Environment path expansion failed");
+const string oldExe = @"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe";
+const string newPackage = "OpenAI.Codex_26.1117.3838.0_x64__2p2nqsd0c76g0";
+const string newRoot = @"D:\WindowsApps\OpenAI.Codex_26.1117.3838.0_x64__2p2nqsd0c76g0";
+var resolved = PackageExecutable.Resolve(oldExe,
+    family => family == "OpenAI.Codex_2p2nqsd0c76g0"
+        ? ["OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0", newPackage,
+           "OpenAI.Codex_99.0.0.0_x64__badpublisher1", "OpenAI.Codex_99.0.0.0_x64_en-us_2p2nqsd0c76g0",
+           "OpenAI.Codex_99.0.0.0_arm64__2p2nqsd0c76g0"]
+        : throw new Exception("Incorrect package family"),
+    full => full == newPackage ? newRoot : Path.GetDirectoryName(Path.GetDirectoryName(oldExe)),
+    _ => true);
+if (resolved != Path.Combine(newRoot, @"app\ChatGPT.exe")) throw new Exception("Store upgrade did not resolve same-family executable on its registered volume");
+if (PackageExecutable.Resolve(oldExe, _ => [], _ => null, _ => false) != oldExe)
+    throw new Exception("Absent Store package should preserve the saved path");
+if (args.Length == 3) {
+    string actual = ApplicationLibrary.ResolvePath(args[1]);
+    if (!actual.Equals(args[2], StringComparison.OrdinalIgnoreCase) || !File.Exists(actual))
+        throw new Exception($"Did not resolve the actual registered package: {actual}");
+    Console.WriteLine("PASS: Windows package API resolved the stale path to the registered ChatGPT executable.");
+}
+Console.WriteLine("PASS: Store app updates resolve current version without changing saved path.");
 if (ApplicationLibrary.ResolvePath("RegionProbe.exe") != Path.Combine(AppContext.BaseDirectory, "RegionProbe.exe")) throw new Exception("Relative path base incorrect");
 File.Delete(path);
 File.WriteAllText(path, """{"version":1,"selectedId":"old","applications":[{"id":"old","name":"old","application":"old.exe","arguments":""}]}""");
