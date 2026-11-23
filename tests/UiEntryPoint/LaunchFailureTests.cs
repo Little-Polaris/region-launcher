@@ -65,7 +65,7 @@ static class LaunchFailureTests
         using (var delayed = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--launch-result started-delay") {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!) {
             object[] next = { 0L, null! }; bool acknowledged = false;
-            Action ready = () => { acknowledged = true; end.Invoke(form, new[] { first[0] }); Check((bool)begin.Invoke(form, next)!, "Next preparation blocked after STARTED"); };
+            Action<int> ready = pid => { acknowledged = pid > 0; end.Invoke(form, new[] { first[0] }); Check((bool)begin.Invoke(form, next)!, "Next preparation blocked after STARTED"); };
             var monitor = (Task)type.GetMethod("MonitorLaunch", Hidden)!.Invoke(form, new object[] { delayed, ready })!;
             Check((bool)type.GetField("preparing", Hidden)!.GetValue(form)!, "Released preparation before STARTED");
             Pump(monitor); monitor.GetAwaiter().GetResult(); end.Invoke(form, new[] { first[0] });

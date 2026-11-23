@@ -11,11 +11,42 @@ static class TrayTests {
         if (!done()) throw new Exception("Tray lifecycle timed out");
     }
     static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
+    static void CheckWindow(Panel running, string bin, string data) {
+        var job = @"Local\RegionLauncher." + Guid.NewGuid().ToString("N");
+        var config = Path.Combine(data, "running-window.ini");
+        File.WriteAllText(config, $"[session]\nJob={job}\nApplication={Environment.ProcessPath}\nArguments=--running-window\nLocale=en-US\nRegion=US\nGeo=244\nTimeZone=Pacific Standard Time\n", Encoding.Unicode);
+        using var session = Process.Start(new ProcessStartInfo(Path.Combine(bin, "RegionSession.exe"), $"--locale-test \"{config}\"") {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+        try {
+            var start = session.StandardOutput.ReadLineAsync();
+            PumpUntil(() => start.IsCompleted);
+            string line = start.GetAwaiter().GetResult() ?? "";
+            Check(line.StartsWith("STARTED PID="), "Missing running window launch acknowledgement");
+            int pid = int.Parse(line[12..]);
+            using var process = Process.GetProcessById(pid);
+            // The fixture is offscreen, but uses a visible taskbar-capable ownerless window.
+            PumpUntil(() => { process.Refresh(); return process.MainWindowHandle != IntPtr.Zero; });
+            var list = running.Controls.OfType<ListBox>().Single();
+            running.GetType().GetMethod("Track")!.Invoke(running, new object[] { "测试窗口", pid, job });
+            Check(list.Items.Count == 1, "Running window was not tracked");
+            list.SelectedIndex = 0;
+            var window = (IntPtr)running.GetType().GetMethod("Window", Hidden)!.Invoke(running, null)!;
+            Check(window == process.MainWindowHandle, "Wrong window resolved for tracked process");
+            list.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(i => i.Text == "退出程序").PerformClick();
+            PumpUntil(() => process.HasExited && list.Items.Count == 0);
+            Console.WriteLine("PASS: sidebar close sends a normal window close and removes the exited entry");
+        } finally {
+            try { using var stop = EventWaitHandle.OpenExisting(job + ".stop"); stop.Set(); } catch (WaitHandleCannotBeOpenedException) { }
+            if (!session.HasExited && !session.WaitForExit(5000)) session.Kill(true);
+        }
+    }
     public static void Run(Form form, string bin, string data) {
         var type = form.GetType();
         var tray = (NotifyIcon)type.GetField("tray", Hidden)!.GetValue(form)!;
         Check(tray.Icon != null && tray.Icon.Handle != System.Drawing.SystemIcons.Application.Handle && form.Icon != null, "Custom tray/window icon missing");
         Check(tray.Visible && tray.ContextMenuStrip!.Items.Count == 3, "Tray menu missing");
+        var running = (Panel)type.GetField("running", Hidden)!.GetValue(form)!;
+        CheckWindow(running, bin, data);
         var job = @"Local\RegionLauncher." + Guid.NewGuid().ToString("N");
         var config = Path.Combine(data, "tray-session.ini"); var report = Path.Combine(data, "tray-processes.txt");
         File.WriteAllText(config, $"[session]\nJob={job}\nApplication={Environment.ProcessPath}\nArguments=--tray-fixture \"{report}\"\nLocale=en-US\nRegion=US\nGeo=244\nTimeZone=Pacific Standard Time\n", Encoding.Unicode);
@@ -27,6 +58,14 @@ static class TrayTests {
             PumpUntil(() => File.Exists(report) && new FileInfo(report).Length > 0);
             var ids = File.ReadAllText(report).Split(',').Select(int.Parse).ToArray();
             using var root = Process.GetProcessById(ids[0]); using var child = Process.GetProcessById(ids[1]);
+            var list = running.Controls.OfType<ListBox>().Single();
+            var track = running.GetType().GetMethod("Track")!;
+            track.Invoke(running, new object[] { "外部程序", outside.Id, job });
+            track.Invoke(running, new object[] { "受控程序", root.Id, job });
+            track.Invoke(running, new object[] { "重复记录", root.Id, job });
+            Check(list.Items.Count == 1 && list.Items[0].ToString() == "受控程序",
+                "Running sidebar did not limit entries to the current job");
+            Console.WriteLine("PASS: running sidebar shows only enrolled launches and deduplicates PIDs");
             type.GetField("session", Hidden)!.SetValue(form, session);
             type.GetField("currentJob", Hidden)!.SetValue(form, job);
             var proxy = type.GetField("dedicatedProxy", Hidden)!.GetValue(form)!;

@@ -43,6 +43,7 @@ sealed class Profile
 sealed class Launcher : Form
 {
     readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, AllowDrop = true, Padding = new(20, 8, 20, 20) };
+    readonly RunningApplications running = new();
     readonly Label homeStatus = new() { Dock = DockStyle.Fill, AutoSize = true, AutoEllipsis = true, ForeColor = HomeTheme.Muted };
     readonly Button footer = new() { Text = "查看运行日志", AccessibleName = "查看运行日志", Dock = DockStyle.Bottom, AutoSize = true,
         FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(234, 236, 241), ForeColor = HomeTheme.Muted,
@@ -114,7 +115,7 @@ sealed class Launcher : Form
         title.FontChanged += (_, _) => FitHeader();
         footer.FlatAppearance.BorderSize = 0;
         footer.Click += (_, _) => ShowRunLog();
-        Controls.Add(tiles); Controls.Add(footer); Controls.Add(header);
+        Controls.Add(tiles); Controls.Add(running); Controls.Add(footer); Controls.Add(header);
         var openLogs = new ToolStripMenuItem("打开日志", null, (_, _) => OpenLogs());
         var showLog = new ToolStripMenuItem("查看运行日志", null, (_, _) => ShowRunLog());
         actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, showLog, openLogs]);
@@ -446,14 +447,20 @@ sealed class Launcher : Form
             psi.ArgumentList.Add(join ? "--join" : "--run"); psi.ArgumentList.Add(config);
             var candidate = new Process { StartInfo = psi };
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
+            string job = currentJob!;
+            void OnStarted(int pid)
+            {
+                running.Track(selected.Name, pid, job);
+                EndPreparation(operation);
+            }
             if (join)
             {
-                using (candidate) { await MonitorLaunch(candidate, () => EndPreparation(operation)); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
+                using (candidate) { await MonitorLaunch(candidate, OnStarted); Append($"加入程序已结束，退出码 {candidate.ExitCode}。"); }
                 return;
             }
             session = candidate;
             Append("正在准备本次进程组；目标程序将在网络引擎就绪后运行。");
-            await MonitorLaunch(session, () => EndPreparation(operation)); diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
+            await MonitorLaunch(session, OnStarted); diagnostics?.CaptureNetworkLog("会话 " + id); Append($"本次运行已结束，退出码 {session.ExitCode}。日志：{folder}"); session.Dispose(); session = null;
         }
         catch (Exception ex) {
             Append("未启动或运行失败：" + ex.Message);
@@ -462,15 +469,15 @@ sealed class Launcher : Form
         }
         finally { EndPreparation(operation); }
     }
-    async Task MonitorLaunch(Process process, Action? onStarted = null) {
-        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task MonitorLaunch(Process process, Action<int>? onStarted = null) {
+        var started = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         Task logs = Task.WhenAll(
             ProcessLog.ReadAsync(process.StandardOutput.BaseStream, line => {
-                if (line.StartsWith("STARTED PID=", StringComparison.Ordinal) && uint.TryParse(line[12..], out uint pid) && pid > 0) started.TrySetResult();
+                if (line.StartsWith("STARTED PID=", StringComparison.Ordinal) && int.TryParse(line[12..], out int pid) && pid > 0) started.TrySetResult(pid);
                 Append(line);
             }), ProcessLog.ReadAsync(process.StandardError.BaseStream, Append));
         await Task.WhenAny(started.Task, logs);
-        if (started.Task.IsCompletedSuccessfully) onStarted?.Invoke();
+        if (started.Task.IsCompletedSuccessfully) onStarted?.Invoke(started.Task.Result);
         await process.WaitForExitAsync(); await logs;
         // Session exit codes also include the application's own exit code; only missing startup is a launch failure.
         if (!started.Task.IsCompletedSuccessfully) throw new IOException($"运行环境未能启动目标程序，退出码 {process.ExitCode}。具体原因见日志。");

@@ -26,6 +26,12 @@ if (args.Length == 2 && args[0] == "--tray-proxy") {
     File.WriteAllText(args[1],$"{port},{dnsPort}");
     Thread.Sleep(Timeout.Infinite); return;
 }
+if (args.Length == 1 && args[0] == "--running-window") {
+    using var window = new Form { Text = "Running sidebar fixture",
+        StartPosition = FormStartPosition.Manual, Location = new(-32000, -32000) };
+    Application.Run(window);
+    return;
+}
 if (args.Length == 2 && args[0] == "--tray-fixture") {
     using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!, "--tray-leaf") { UseShellExecute = false, CreateNoWindow = true })!;
     File.WriteAllText(args[1], $"{Environment.ProcessId},{child.Id}");
@@ -195,7 +201,8 @@ var ui = new Thread(() =>
             form.Font = largerFont;
             Application.DoEvents();
             if (header.GetRow(quick) != 2 || !header.ClientRectangle.Contains(quick.Bounds) ||
-                title.Bounds.IntersectsWith(quick.Bounds) || !tiles.ClientRectangle.Contains(Tile(0).Bounds) ||
+                title.Bounds.IntersectsWith(quick.Bounds) || (!tiles.ClientRectangle.Contains(Tile(0).Bounds) &&
+                    (!tiles.VerticalScroll.Visible || Tile(0).Bottom <= tiles.ClientSize.Height)) ||
                 Tile(0).Size != Tile(0).GetPreferredSize(System.Drawing.Size.Empty))
                 throw new Exception($"Compact layout: DPI={form.DeviceDpi}, form={form.Size}, header={header.ClientRectangle}, actions={quick.Bounds}, row={header.GetRow(quick)}, title={title.Bounds}, panel={tiles.ClientRectangle}, card={Tile(0).Bounds}, preferred={Tile(0).GetPreferredSize(System.Drawing.Size.Empty)}");
             Snapshot(form, "software-launcher-large-font.png");
