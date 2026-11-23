@@ -89,7 +89,7 @@ sealed class Launcher : Form
         for (int row = 0; row < 3; row++) header.RowStyles.Add(new(SizeType.AutoSize));
         var title = new Label { Text = "Region Launcher", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft,
             Font = new(Font.FontFamily, 16, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
-        var quick = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+        var quick = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
         var check = HomeTheme.Action("检测并修复"); check.Click += (_, _) => checkProxy.PerformClick();
         var node = HomeTheme.Action("切换节点"); node.Click += (_, _) => switchProxy.PerformClick();
         checkProxy.EnabledChanged += (_, _) => check.Enabled = checkProxy.Enabled;
@@ -106,6 +106,7 @@ sealed class Launcher : Form
             header.SuspendLayout();
             header.SetCellPosition(quick, narrow ? new TableLayoutPanelCellPosition(0, 2) : new TableLayoutPanelCellPosition(1, 0));
             header.SetColumnSpan(quick, narrow ? 2 : 1);
+            header.SetColumnSpan(title, narrow ? 2 : 1);
             header.ResumeLayout(true);
         }
         header.SizeChanged += (_, _) => FitHeader();

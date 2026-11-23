@@ -110,7 +110,10 @@ static class Subscription
                         if (groupBytes > remainingBytes) throw new IOException();
                         members.Add(node.DeepClone());
                     }
-                    var group = new JsonObject { ["type"] = "fallback", ["name"] = name, ["members"] = members };
+                    var options = ProxyConfiguration.FallbackOptions(entry);
+                    groupBytes += Encoding.UTF8.GetByteCount(options.ToJsonString());
+                    if (groupBytes > remainingBytes) throw new IOException();
+                    var group = new JsonObject { ["type"] = "fallback", ["name"] = name, ["members"] = members, ["options"] = options };
                     groupNames.Add(name);
                     remainingMembers -= members.Count;
                     remainingBytes -= groupBytes;
@@ -142,7 +145,7 @@ static class Subscription
         }
         var value = (YamlScalarNode)node; string s = value.Value ?? "";
         // Numeric-looking credentials, hostnames and fingerprints must remain strings.
-        if (new[] { "name", "type", "server", "password", "uuid", "token", "cipher", "sni", "servername", "short-id", "public-key", "obfs-password" }.Contains(key) || value.Style is ScalarStyle.SingleQuoted or ScalarStyle.DoubleQuoted)
+        if (new[] { "name", "type", "server", "password", "uuid", "token", "cipher", "sni", "servername", "short-id", "public-key", "obfs-password", "expected-status" }.Contains(key) || value.Style is ScalarStyle.SingleQuoted or ScalarStyle.DoubleQuoted)
             return JsonValue.Create(s);
         if (bool.TryParse(s, out bool boolean)) return JsonValue.Create(boolean);
         if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number)) return JsonValue.Create(number);

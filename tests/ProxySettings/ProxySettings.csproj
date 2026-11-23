@@ -7,6 +7,8 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <Compile Include="../../src/Subscription.cs" Link="Subscription.cs" />
     <Compile Include="../../src/SubscriptionDialog.cs" Link="SubscriptionDialog.cs" />
+    <Compile Include="../../src/SubscriptionLibrary.cs" Link="SubscriptionLibrary.cs" />
+    <Compile Include="../../src/ProxySwitchDialog.cs" Link="ProxySwitchDialog.cs" />
     <Compile Include="../../src/ProxyConfiguration.cs" Link="ProxyConfiguration.cs" />
     <Compile Include="../../src/ProxySettingsDialog.cs" Link="ProxySettingsDialog.cs" />
     <Compile Include="../../src/DedicatedProxy.cs" Link="DedicatedProxy.cs" />

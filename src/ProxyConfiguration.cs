@@ -8,6 +8,20 @@ using System.Text.Json.Nodes;
 static class ProxyConfiguration
 {
     const string GroupLabel = "region-launcher-group-name";
+    // Only operational fields for a self-contained fallback group, never host routing or provider settings.
+    internal static JsonObject FallbackOptions(JsonObject group)
+    {
+        var options = new JsonObject();
+        foreach (string key in new[] { "url", "interval", "timeout", "lazy", "expected-status", "max-failed-times", "disable-udp" })
+        {
+            if (group[key] is not JsonNode value) continue;
+            if (key == "url" && (!Uri.TryCreate(value.GetValue<string>(), UriKind.Absolute, out var url) ||
+                url.Scheme is not ("http" or "https") || url.IsLoopback || url.UserInfo.Length != 0))
+                throw new IOException("自动组探测地址需要是无凭据的远程 HTTP(S) 地址。");
+            options[key] = value.DeepClone();
+        }
+        return options;
+    }
     public static readonly string[] Protocols = ["hysteria2", "vless", "vmess", "trojan", "ss", "tuic", "anytls"];
     public static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
@@ -37,7 +51,8 @@ static class ProxyConfiguration
         {
             if (root["mixed-port"] != null) port = root["mixed-port"]!.GetValue<int>();
             if (root["proxy-groups"] != null)
-                return new JsonObject { ["type"] = "fallback", ["name"] = root[GroupLabel]?.DeepClone(), ["members"] = nodes.DeepClone() };
+                return new JsonObject { ["type"] = "fallback", ["name"] = root[GroupLabel]?.DeepClone(), ["members"] = nodes.DeepClone(),
+                    ["options"] = FallbackOptions(root["proxy-groups"]![0]!.AsObject()) };
             if (nodes.Count != 1 || nodes[0] is not JsonObject) throw new IOException("请选择单个节点或自动故障切换组。");
             root = (JsonObject)nodes[0]!.DeepClone();
         }
@@ -117,12 +132,12 @@ static class ProxyConfiguration
         }
         config["proxies"] = proxies;
         config[GroupLabel] = input["name"]!.DeepClone();
-        config["proxy-groups"] = new JsonArray(new JsonObject
-        {
-            ["name"] = "RegionExit", ["type"] = "fallback", ["proxies"] = names,
-            ["url"] = "https://www.cloudflare.com/cdn-cgi/trace",
-            ["expected-status"] = "200", ["interval"] = 60, ["timeout"] = 5000, ["lazy"] = false
-        });
+        // Existing caches without original settings still work until the subscription is refreshed.
+        var group = input["options"] is JsonObject supplied ? FallbackOptions(supplied) : JsonNode.Parse("""
+            {"url":"https://www.cloudflare.com/cdn-cgi/trace","expected-status":"200","interval":60,"timeout":5000,"lazy":false}
+            """)!.AsObject();
+        group["name"] = "RegionExit"; group["type"] = "fallback"; group["proxies"] = names;
+        config["proxy-groups"] = new JsonArray(group);
         return config;
     }
 

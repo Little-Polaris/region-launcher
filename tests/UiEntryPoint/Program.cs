@@ -197,7 +197,7 @@ var ui = new Thread(() =>
             if (header.GetRow(quick) != 2 || !header.ClientRectangle.Contains(quick.Bounds) ||
                 title.Bounds.IntersectsWith(quick.Bounds) || !tiles.ClientRectangle.Contains(Tile(0).Bounds) ||
                 Tile(0).Size != Tile(0).GetPreferredSize(System.Drawing.Size.Empty))
-                throw new Exception("Compact window did not adapt to larger fonts");
+                throw new Exception($"Compact layout: DPI={form.DeviceDpi}, form={form.Size}, header={header.ClientRectangle}, actions={quick.Bounds}, row={header.GetRow(quick)}, title={title.Bounds}, panel={tiles.ClientRectangle}, card={Tile(0).Bounds}, preferred={Tile(0).GetPreferredSize(System.Drawing.Size.Empty)}");
             Snapshot(form, "software-launcher-large-font.png");
             form.Font = new System.Drawing.Font(largerFont.FontFamily, 10f);
         }

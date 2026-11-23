@@ -44,7 +44,7 @@ static class SubscriptionTests
         Assert(protectedConfig["rules"]![0]!.GetValue<string>() == "MATCH,RegionExit" && !protectedConfig["tun"]!["enable"]!.GetValue<bool>(), "Subscription changed host routing");
         var grouped = Subscription.Parse(yaml + "\n" + """
         proxy-groups:
-          - {name: US Auto, type: fallback, proxies: [US 二号, US 一号], url: http://example.invalid}
+          - {name: US Auto, type: fallback, proxies: [US 二号, US 一号], url: http://example.invalid, interval: 180, timeout: 3300, lazy: true, expected-status: 204}
           - {name: Direct fallback, type: fallback, proxies: [US 一号, DIRECT]}
           - {name: Nested fallback, type: fallback, proxies: [US 一号, US Auto]}
           - {name: Unsupported member, type: fallback, proxies: [US 一号, unsupported]}
@@ -76,7 +76,11 @@ static class SubscriptionTests
         Assert(port == 17911 && JsonNode.DeepEquals(failover, ProxyConfiguration.Build(savedGroup, port)), "Group round-trip or local port changed");
         Assert(failover["proxies"]![0]!["server"]!.GetValue<string>() == "192.0.2.2", "Import order lost");
         Assert(failover["proxy-groups"]![0]!["proxies"]![0]!.GetValue<string>() == "RegionMember1", "Group order lost");
-        Assert(!failover.ToJsonString().Contains("example.invalid"), "Subscription health check leaked into runtime policy");
+        var options = failover["proxy-groups"]![0]!;
+        Assert(options["url"]!.GetValue<string>() == "http://example.invalid" &&
+            options["interval"]!.GetValue<int>() == 180 && options["timeout"]!.GetValue<int>() == 3300 &&
+            options["lazy"]!.GetValue<bool>() && options["expected-status"]!.GetValue<string>() == "204",
+            "Subscription health check settings were overridden");
         var invalidGroup = (JsonObject)failover.DeepClone();
         invalidGroup["proxy-groups"]![0]!["proxies"]![0] = "DIRECT";
         string invalidPath = Path.Combine(folder, "failover-rejected.json");
@@ -134,10 +138,23 @@ static class SubscriptionTests
         proxy-groups:
           - {name: US Auto, type: fallback, proxies: [US first, JP second]}
         """);
+        var legacy = Path.Combine(folder, "subscription.json");
+        string old = new JsonObject { ["url"] = "https://old.example.invalid/token", ["viaProxy"] = false, ["selected"] = 0,
+            ["nodes"] = new JsonArray((JsonNode?)nodes.Nodes[0].Node.DeepClone()) }.ToJsonString();
+        File.WriteAllText(legacy, old);
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        T Field<T>(object obj, string key) => (T)obj.GetType().GetField(key, flags)!.GetValue(obj)!;
         using (var form = new SubscriptionDialog(folder))
         {
-            form.SetNodes(nodes);
+            var sources = Field<ComboBox>(form, "sources");
+            Assert(sources.Items.Count == 2 && sources.SelectedItem?.ToString() == "原有订阅", "Legacy cache was not loaded");
+            sources.SelectedIndex = 0;
+            Field<TextBox>(form, "name").Text = "第二份订阅";
+            form.SaveFetched("https://new.example.invalid/token", true, nodes);
+            string persisted = File.ReadAllText(Path.Combine(folder, "subscriptions.json"));
+            try { form.SaveFetched("https://new.example.invalid/token", true, new([], 0)); throw new Exception("Empty refresh accepted"); }
+            catch (IOException) { Assert(File.ReadAllText(Path.Combine(folder, "subscriptions.json")) == persisted, "Failed refresh changed cache"); }
+            Assert(File.ReadAllText(legacy) == old, "Legacy cache was modified");
             var filter = (TextBox)typeof(SubscriptionDialog).GetField("filter", flags)!.GetValue(form)!;
             var list = (ListBox)typeof(SubscriptionDialog).GetField("nodes", flags)!.GetValue(form)!;
             filter.Text = "Auto"; Assert(list.Items.Count == 1, "Group search result"); list.SelectedIndex = 0;
@@ -160,7 +177,22 @@ static class SubscriptionTests
         reopened.Show(); Application.DoEvents();
         using var bitmap = new Bitmap(reopened.Width, reopened.Height);
         reopened.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(Path.Combine(folder, "subscription.png"));
+        var listSources = Field<ComboBox>(reopened, "sources");
+        Assert(listSources.Items.Count == 3 && listSources.SelectedItem?.ToString() == "第二份订阅", "Saved subscription not restored");
+        listSources.SelectedIndex = 1;
+        Assert(savedList.Items.Count == 1 && ((SubscriptionNode)savedList.SelectedItem!).Name == "US first", "Source selection leaked nodes or last choice");
         reopened.Close();
+        var missingOptions = ProxyConfiguration.Build(nodes.Nodes.Single(n => n.Name == "US Auto").Node, 17911);
+        Assert(missingOptions["proxy-groups"]![0]!["url"] == null && missingOptions["proxy-groups"]![0]!["interval"] == null,
+            "Omitted probe settings were replaced by launcher defaults");
+        string configPath = Path.Combine(folder, "switch-source.json");
+        File.WriteAllText(configPath, ProxyConfiguration.Build(nodes.Nodes[0].Node, 17911).ToJsonString());
+        using var picker = new ProxySwitchDialog(configPath);
+        var pickerSources = picker.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().Single();
+        var pickerChoices = Field<ListBox>(picker, "choices");
+        Assert(pickerSources.Items.Count == 3 && pickerChoices.Items.Count == 3, "Live switch did not load fixed nodes from chosen source");
+        pickerSources.SelectedIndex = 1; pickerChoices.SelectedIndex = 1;
+        Assert(pickerChoices.Items.Count == 2 && picker.SelectedNode?["name"]?.GetValue<string>() == "US first", "Live switch mixed subscription sources");
         Console.WriteLine("PASS: filter, choose correct node and restore cached multi-node selection");
     }
 
