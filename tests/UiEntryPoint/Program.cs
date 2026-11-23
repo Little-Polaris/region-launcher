@@ -189,6 +189,9 @@ var ui = new Thread(() =>
                     throw new Exception($"Card text is clipped or obscured at {dpi} DPI (size {size})");
             }
         }
+        var running = Field<Panel>(form, "running");
+        var runningTitle = running.Controls.OfType<Label>().Single();
+        if (runningTitle.Width < runningTitle.PreferredWidth) throw new Exception("Running sidebar title is clipped");
         Snapshot(form, "software-launcher.png");
         var originalSize = form.Size;
         form.Size = form.MinimumSize; Application.DoEvents();

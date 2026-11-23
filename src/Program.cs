@@ -179,6 +179,7 @@ sealed class Launcher : Form
     }
     protected override void OnLoad(EventArgs e)
     {
+        running.FitWidth();
         var work = Screen.FromControl(this).WorkingArea;
         MinimumSize = new Size(Math.Min(MinimumSize.Width, work.Width), Math.Min(MinimumSize.Height, work.Height));
         if (Width > work.Width || Height > work.Height) {

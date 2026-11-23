@@ -40,6 +40,21 @@ sealed class RunningApplications : Panel
         timer.Tick += (_, _) => RemoveExited();
     }
 
+    public void FitWidth() =>
+        Width = Math.Max(LogicalToDeviceUnits(150), title.PreferredWidth + LogicalToDeviceUnits(20));
+
+    protected override void OnDpiChangedAfterParent(EventArgs e)
+    {
+        base.OnDpiChangedAfterParent(e);
+        FitWidth();
+    }
+
+    protected override void OnFontChanged(EventArgs e)
+    {
+        base.OnFontChanged(e);
+        FitWidth();
+    }
+
     public void Track(string name, int pid, string jobName)
     {
         Process? process = null;
@@ -61,6 +76,7 @@ sealed class RunningApplications : Panel
     void UpdateCount()
     {
         title.Text = $"正在运行 ({list.Items.Count})";
+        FitWidth();
         timer.Enabled = list.Items.Count != 0;
     }
 
