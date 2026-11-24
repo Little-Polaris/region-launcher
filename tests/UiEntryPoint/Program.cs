@@ -88,6 +88,7 @@ var ui = new Thread(() =>
         object Entry(int index) => Tile(index).Tag!;
         T Property<T>(object item, string name) => (T)item.GetType().GetProperty(name)!.GetValue(item)!;
         T Field<T>(object instance, string name) => (T)instance.GetType().GetField(name, flags)!.GetValue(instance)!;
+        void SetProperty(object instance, string name, object value) => instance.GetType().GetProperty(name)!.SetValue(instance, value);
         if (tiles.Controls.Count != 2 || Property<string>(Entry(0), "Arguments") != "--legacy=\"中文 参数\"" ||
             Tile(1).Text != "添加程序" || Tile(0).Image is not { Width: >= 48 } || Tile(0).ContextMenuStrip?.Items.Count != 5)
             throw new Exception($"Legacy entry or tile actions missing: tiles={tiles.Controls.Count}, icon={Tile(0).Image?.Size}, actions={Tile(0).ContextMenuStrip?.Items.Count}");
@@ -96,7 +97,7 @@ var ui = new Thread(() =>
             throw new Exception("Logs must remain available from the menu");
         var status = Field<Label>(form, "homeStatus");
         if (!status.Text.Contains("1 个程序") || !Tile(0).AccessibleDescription!.Contains("US · en-US") ||
-            Field<Button>(form, "footer").Text != "查看运行日志") throw new Exception("Home card and status unavailable");
+            Field<Control>(form, "footer").Text != "查看运行日志") throw new Exception("Home card and status unavailable");
         var drag = form.GetType().GetMethod("DroppedExecutable", BindingFlags.Static | BindingFlags.NonPublic)!;
         object Drop(params string[] paths) => drag.Invoke(null, new object[] {
             new DragEventArgs(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, DragDropEffects.Copy, DragDropEffects.None) });
@@ -107,7 +108,8 @@ var ui = new Thread(() =>
         var tail = (string)diagnostics.GetType().GetMethod("ReadTail", flags)!.Invoke(diagnostics, null)!;
         if (!tail.Contains("启动器版本 ") || !tail.Contains("请在右上角菜单选择")) throw new Exception("Run log does not expose the current diagnostic file");
         using (var log = (Form)form.GetType().GetMethod("CreateRunLog", flags)!.Invoke(form, null)!) {
-            if (!log.Controls.OfType<TextBox>().Single().Text.Contains("启动器版本 ")) throw new Exception("Log dialog is not wired to diagnostics");
+            static IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>().SelectMany(child => Descendants(child).Prepend(child));
+            if (!Descendants(log).OfType<TextBox>().Single().Text.Contains("启动器版本 ")) throw new Exception("Log dialog is not wired to diagnostics");
         }
         var editorType = assembly.GetType("ApplicationEditor")!;
         foreach (float fontSize in new[] { 10f, 15f, 20f }) {
@@ -131,18 +133,18 @@ var ui = new Thread(() =>
         using (var editor = (System.Windows.Forms.Form)Activator.CreateInstance(editorType, new object[] { null, null })!) {
             editor.StartPosition = System.Windows.Forms.FormStartPosition.Manual; editor.Location = new(-32000, -32000); editor.ShowInTaskbar = false;
             editor.Show(); System.Windows.Forms.Application.DoEvents();
-            ((System.Windows.Forms.TextBox)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "第二个软件 🚀";
-            ((System.Windows.Forms.TextBox)editorType.GetField("executable", flags)!.GetValue(editor)!).Text = Environment.ProcessPath!;
-            ((System.Windows.Forms.TextBox)editorType.GetField("arguments", flags)!.GetValue(editor)!).Text = "--second=\"两个 参数\"";
+            ((System.Windows.Forms.Control)editorType.GetField("name", flags)!.GetValue(editor)!).Text = "第二个软件 🚀";
+            ((System.Windows.Forms.Control)editorType.GetField("executable", flags)!.GetValue(editor)!).Text = Environment.ProcessPath!;
+            ((System.Windows.Forms.Control)editorType.GetField("arguments", flags)!.GetValue(editor)!).Text = "--second=\"两个 参数\"";
             var editCountry = (System.Windows.Forms.ComboBox)editorType.GetField("country", flags)!.GetValue(editor)!;
             var editLanguage = (System.Windows.Forms.ComboBox)editorType.GetField("language", flags)!.GetValue(editor)!;
             var editZone = (System.Windows.Forms.ComboBox)editorType.GetField("timeZone", flags)!.GetValue(editor)!;
             editCountry.SelectedItem = editCountry.Items.Cast<object>().Single(r => (int)r.GetType().GetProperty("GeoId")!.GetValue(r)! == 122);
             editLanguage.SelectedItem = editLanguage.Items.Cast<object>().Single(l => (string)l.GetType().GetProperty("Name")!.GetValue(l)! == "ja-JP");
             editZone.SelectedItem = editZone.Items.Cast<TimeZoneInfo>().Single(z => z.Id == "Tokyo Standard Time");
-            ((System.Windows.Forms.CheckBox)editorType.GetField("dst", flags)!.GetValue(editor)!).Checked = false;
+            SetProperty(editorType.GetField("dst", flags)!.GetValue(editor)!, "Checked", false);
             Snapshot(editor, "software-editor.png");
-            ((System.Windows.Forms.Button)editorType.GetField("save", flags)!.GetValue(editor)!).PerformClick();
+            ((System.Windows.Forms.IButtonControl)editorType.GetField("save", flags)!.GetValue(editor)!).PerformClick();
             if (editor.DialogResult != System.Windows.Forms.DialogResult.OK) throw new Exception("Software editor did not save");
             var item = editorType.GetProperty("Entry")!.GetValue(editor)!;
             form.GetType().GetMethod("SaveSoftware", flags)!.Invoke(form, new[] { item });
@@ -155,16 +157,16 @@ var ui = new Thread(() =>
             var editCountry = Field<ComboBox>(editor, "country");
             var editLanguage = Field<ComboBox>(editor, "language");
             var editZone = Field<ComboBox>(editor, "timeZone");
-            var editDst = Field<CheckBox>(editor, "dst");
-            if (((TimeZoneInfo)editZone.SelectedItem!).Id != "Tokyo Standard Time" || editDst.Checked ||
+            var editDst = Field<Control>(editor, "dst");
+            if (((TimeZoneInfo)editZone.SelectedItem!).Id != "Tokyo Standard Time" || Property<bool>(editDst, "Checked") ||
                 Property<int>(editCountry.SelectedItem!, "GeoId") != 122 || Property<string>(editLanguage.SelectedItem!, "Name") != "ja-JP")
                 throw new Exception("Per-app settings not loaded in editor");
-            Field<TextBox>(editor, "name").Text = "编辑后的软件";
+            Field<Control>(editor, "name").Text = "编辑后的软件";
             editCountry.SelectedItem = editCountry.Items.Cast<object>().Single(r => Property<int>(r, "GeoId") == 94);
             editLanguage.SelectedItem = editLanguage.Items.Cast<object>().Single(l => Property<string>(l, "Name") == "de-DE");
             editZone.SelectedItem = editZone.Items.Cast<TimeZoneInfo>().Single(z => z.Id == "W. Europe Standard Time");
-            editDst.Checked = true;
-            Field<Button>(editor, "save").PerformClick();
+            SetProperty(editDst, "Checked", true);
+            Field<IButtonControl>(editor, "save").PerformClick();
             form.GetType().GetMethod("SaveSoftware", flags)!.Invoke(form, new[] { Property<object>(editor, "Entry") });
             if (tiles.Controls.Count != 3 || Tile(1).Text != "编辑后的软件" || Property<string>(Entry(1), "Arguments") != "--second=\"两个 参数\"")
                 throw new Exception("Edit duplicated tile or lost arguments");

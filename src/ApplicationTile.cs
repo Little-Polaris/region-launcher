@@ -1,32 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
 
-static class HomeTheme
-{
-    public static readonly Color Background = Color.FromArgb(243, 244, 247);
-    public static readonly Color Text = Color.FromArgb(28, 32, 40);
-    public static readonly Color Muted = Color.FromArgb(94, 101, 114);
-    public static readonly Color Accent = Color.FromArgb(37, 99, 235);
-    public static readonly Color Border = Color.FromArgb(226, 229, 235);
-    public static readonly Color Hover = Color.FromArgb(234, 241, 253);
-
-    public static Button Action(string text)
-    {
-        var button = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat, Padding = new(5, 0, 5, 0),
-            BackColor = Color.White, ForeColor = Text, Cursor = Cursors.Hand, UseMnemonic = false };
-        button.FlatAppearance.BorderColor = Border;
-        button.FlatAppearance.MouseOverBackColor = Hover;
-        return button;
-    }
-
-    public static GraphicsPath Rounded(RectangleF bounds, int radius)
-    {
-        var path = new GraphicsPath();
-        path.AddRoundedRectangle(bounds, new SizeF(radius, radius));
-        return path;
-    }
-}
-
 sealed class ApplicationTile : Button
 {
     static readonly Lazy<Dictionary<int, string>> Regions = new(() => WindowsSettings.Regions()

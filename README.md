@@ -117,4 +117,4 @@ python -X utf8 tests/test_package.py <生成的ZIP路径>
 
 ## 许可证
 
-项目代码采用 [MIT License](LICENSE)。随附的第三方组件按各自许可证分发，包括 Detours、ProxyBridge、WinDivert、YamlDotNet 和 Mihomo；版本、源码链接及许可证说明见 [SOURCES](docs/SOURCES.md)，发布包内保留对应许可证。
+项目代码采用 [MIT License](LICENSE)。随附的第三方组件按各自许可证分发，包括 Detours、ProxyBridge、WinDivert、YamlDotNet、AntdUI 和 Mihomo；版本、源码链接及许可证说明见 [SOURCES](docs/SOURCES.md)，发布包内保留对应许可证。

@@ -146,16 +146,16 @@ static class SubscriptionTests
         T Field<T>(object obj, string key) => (T)obj.GetType().GetField(key, flags)!.GetValue(obj)!;
         using (var form = new SubscriptionDialog(folder))
         {
-            var sources = Field<ComboBox>(form, "sources");
-            Assert(sources.Items.Count == 2 && sources.SelectedItem?.ToString() == "原有订阅", "Legacy cache was not loaded");
+            var sources = Field<AntdUI.Select>(form, "sources");
+            Assert(sources.Items.Count == 2 && sources.SelectedValue?.ToString() == "原有订阅", "Legacy cache was not loaded");
             sources.SelectedIndex = 0;
-            Field<TextBox>(form, "name").Text = "第二份订阅";
+            Field<Control>(form, "name").Text = "第二份订阅";
             form.SaveFetched("https://new.example.invalid/token", true, nodes);
             string persisted = File.ReadAllText(Path.Combine(folder, "subscriptions.json"));
             try { form.SaveFetched("https://new.example.invalid/token", true, new([], 0)); throw new Exception("Empty refresh accepted"); }
             catch (IOException) { Assert(File.ReadAllText(Path.Combine(folder, "subscriptions.json")) == persisted, "Failed refresh changed cache"); }
             Assert(File.ReadAllText(legacy) == old, "Legacy cache was modified");
-            var filter = (TextBox)typeof(SubscriptionDialog).GetField("filter", flags)!.GetValue(form)!;
+            var filter = (Control)typeof(SubscriptionDialog).GetField("filter", flags)!.GetValue(form)!;
             var list = (ListBox)typeof(SubscriptionDialog).GetField("nodes", flags)!.GetValue(form)!;
             filter.Text = "Auto"; Assert(list.Items.Count == 1, "Group search result"); list.SelectedIndex = 0;
             typeof(SubscriptionDialog).GetMethod("Choose", flags)!.Invoke(form, null);
@@ -164,8 +164,8 @@ static class SubscriptionTests
             using var settings = new ProxySettingsDialog(proxy);
             settings.LoadText(config.ToJsonString());
             Assert(JsonNode.DeepEquals(settings.ReadConfig(), config), "Settings cannot show or save the group");
-            var protocol = (ComboBox)typeof(ProxySettingsDialog).GetField("protocol", flags)!.GetValue(settings)!;
-            Assert(protocol.SelectedItem!.ToString()!.Contains("US Auto"), "Missing group name in settings");
+            var protocol = (AntdUI.Select)typeof(ProxySettingsDialog).GetField("protocol", flags)!.GetValue(settings)!;
+            Assert(protocol.SelectedValue!.ToString()!.Contains("US Auto"), "Missing group name in settings");
             protocol.SelectedIndex = 0;
             settings.LoadText(ProxyConfiguration.Build(nodes.Nodes[0].Node, 17911).ToJsonString());
             Assert(settings.ReadConfig()["proxy-groups"] == null, "Cannot return to a single node");
@@ -177,8 +177,8 @@ static class SubscriptionTests
         reopened.Show(); Application.DoEvents();
         using var bitmap = new Bitmap(reopened.Width, reopened.Height);
         reopened.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(Path.Combine(folder, "subscription.png"));
-        var listSources = Field<ComboBox>(reopened, "sources");
-        Assert(listSources.Items.Count == 3 && listSources.SelectedItem?.ToString() == "第二份订阅", "Saved subscription not restored");
+        var listSources = Field<AntdUI.Select>(reopened, "sources");
+        Assert(listSources.Items.Count == 3 && listSources.SelectedValue?.ToString() == "第二份订阅", "Saved subscription not restored");
         listSources.SelectedIndex = 1;
         Assert(savedList.Items.Count == 1 && ((SubscriptionNode)savedList.SelectedItem!).Name == "US first", "Source selection leaked nodes or last choice");
         reopened.Close();
@@ -188,7 +188,7 @@ static class SubscriptionTests
         string configPath = Path.Combine(folder, "switch-source.json");
         File.WriteAllText(configPath, ProxyConfiguration.Build(nodes.Nodes[0].Node, 17911).ToJsonString());
         using var picker = new ProxySwitchDialog(configPath);
-        var pickerSources = picker.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().Single();
+        var pickerSources = Field<AntdUI.Select>(picker, "sources");
         var pickerChoices = Field<ListBox>(picker, "choices");
         Assert(pickerSources.Items.Count == 3 && pickerChoices.Items.Count == 3, "Live switch did not load fixed nodes from chosen source");
         pickerSources.SelectedIndex = 1; pickerChoices.SelectedIndex = 1;

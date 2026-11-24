@@ -4,28 +4,41 @@ using Microsoft.Win32.SafeHandles;
 
 sealed class RunningApplications : Panel
 {
-    sealed record Entry(string Name, Process Process)
+    sealed record Entry(string Name, Process Process, Bitmap? Icon, DateTime Started)
     {
         public override string ToString() => Name;
     }
 
-    readonly ListBox list = new() { Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true, AccessibleName = "正在运行的程序" };
+    readonly ModernList list = new() { Dock = DockStyle.Fill, AccessibleName = "正在运行的程序",
+        EmptyText = "暂无运行中的程序", EmptyHint = "点击左侧卡片启动" };
     readonly ContextMenuStrip menu = new();
     readonly System.Windows.Forms.Timer timer = new() { Interval = 800 };
-    readonly Label title = new() { Text = "正在运行 (0)", AutoSize = true, Dock = DockStyle.Top, Padding = new(0, 0, 0, 6) };
+    readonly Label title = new() { Text = "正在运行", AutoSize = true, Dock = DockStyle.Top, Padding = new(2, 0, 0, 8),
+        ForeColor = HomeTheme.Text, UseMnemonic = false };
+    readonly AntdUI.Tag count = new() { Text = "0", AutoSizeMode = AntdUI.TAutoSize.Auto, Radius = 10, Anchor = AnchorStyles.Top | AnchorStyles.Right };
 
     public RunningApplications()
     {
-        Dock = DockStyle.Right; Width = 150; Padding = new(0, 8, 16, 16);
-        Controls.Add(list); Controls.Add(title);
+        Dock = DockStyle.Right; Width = 220; Padding = new(4 + 14, 8 + 14, 20 + 8, 16 + 8); Margin = Padding.Empty;
+        SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        BackColor = HomeTheme.Background;
+        title.Font = new(HomeTheme.FontName, 10.5f, FontStyle.Bold);
+        title.BackColor = HomeTheme.Surface; count.BackColor = HomeTheme.Surface;
+        list.Detail = item => item is Entry entry ? Describe(entry) : null;
+        list.ItemIcon = item => (item as Entry)?.Icon;
+        list.Dot = item => item is Entry { Process.HasExited: false } ? HomeTheme.Success : HomeTheme.Subtle;
+        list.Refit();
+        Controls.Add(list); Controls.Add(title); Controls.Add(count); count.BringToFront();
         list.ContextMenuStrip = menu;
-        var foreground = menu.Items.Add("切到前台", null, (_, _) => ActivateSelected());
-        var copy = menu.Items.Add("复制进程 ID", null, (_, _) => {
+        HomeTheme.Apply(menu);
+        Image? MenuIcon(string name, Color? color = null) => HomeTheme.Icon(name, LogicalToDeviceUnits(16), color ?? HomeTheme.Muted);
+        var foreground = menu.Items.Add("切到前台", MenuIcon("ExportOutlined", HomeTheme.Accent), (_, _) => ActivateSelected());
+        var copy = menu.Items.Add("复制进程 ID", MenuIcon("CopyOutlined"), (_, _) => {
             if (list.SelectedItem is Entry entry && !entry.Process.HasExited)
                 try { Clipboard.SetText(entry.Process.Id.ToString()); } catch (ExternalException) { Feedback("剪贴板暂时不可用。"); }
         });
         menu.Items.Add(new ToolStripSeparator());
-        var close = menu.Items.Add("退出程序", null, (_, _) => {
+        var close = menu.Items.Add("退出程序", MenuIcon("PoweroffOutlined", HomeTheme.Danger), (_, _) => {
             if (Window() is var window && window != IntPtr.Zero && !PostMessageW(window, 0x0010, IntPtr.Zero, IntPtr.Zero))
                 Feedback("无法向程序发送关闭请求。");
         });
@@ -37,11 +50,47 @@ sealed class RunningApplications : Panel
         list.MouseDown += (_, e) => { if (e.Button == MouseButtons.Right) list.SelectedIndex = list.IndexFromPoint(e.Location); };
         list.MouseDoubleClick += (_, e) => { if (e.Button == MouseButtons.Left && list.IndexFromPoint(e.Location) >= 0) ActivateSelected(); };
         list.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ActivateSelected(); } };
-        timer.Tick += (_, _) => RemoveExited();
+        timer.Tick += (_, _) => { RemoveExited(); list.Invalidate(); };
+    }
+
+    static string Describe(Entry entry)
+    {
+        var elapsed = DateTime.Now - entry.Started;
+        string age = elapsed.TotalMinutes < 1 ? "刚刚启动" : elapsed.TotalHours < 1 ? $"{(int)elapsed.TotalMinutes} 分钟"
+            : elapsed.TotalDays < 1 ? $"{(int)elapsed.TotalHours} 小时 {elapsed.Minutes} 分" : $"{(int)elapsed.TotalDays} 天";
+        return $"PID {entry.Process.Id} · {age}";
+    }
+
+    static Bitmap? ProcessIcon(Process process, int size)
+    {
+        try {
+            string? path = process.MainModule?.FileName;
+            if (path == null) return null;
+            using var icon = Icon.ExtractIcon(path, 0, size);
+            return icon?.ToBitmap();
+        } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException or IOException or NotSupportedException) { return null; }
     }
 
     public void FitWidth() =>
-        Width = Math.Max(LogicalToDeviceUnits(150), title.PreferredWidth + LogicalToDeviceUnits(20));
+        Width = Math.Max(LogicalToDeviceUnits(220), title.PreferredWidth + count.Width + Padding.Horizontal + LogicalToDeviceUnits(24));
+
+    protected override void OnLayout(LayoutEventArgs levent)
+    {
+        base.OnLayout(levent);
+        count.Location = new(ClientSize.Width - Padding.Right - count.Width - LogicalToDeviceUnits(6), title.Top + Math.Max(0, (title.Height - title.Padding.Bottom - count.Height) / 2));
+    }
+
+    // Card margin inside the panel; Padding adds the card's inner spacing on top of it.
+    static readonly Padding CardMargin = new(4, 8, 20, 16);
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(BackColor);
+        int S(int n) => LogicalToDeviceUnits(n);
+        var card = new RectangleF(S(CardMargin.Left) + 0.5f, S(CardMargin.Top) + 0.5f,
+            ClientSize.Width - S(CardMargin.Horizontal) - 1f, ClientSize.Height - S(CardMargin.Vertical) - 1f);
+        HomeTheme.Card(e.Graphics, card, S(12), HomeTheme.Surface, HomeTheme.Border, 3);
+    }
 
     protected override void OnDpiChangedAfterParent(EventArgs e)
     {
@@ -65,7 +114,9 @@ sealed class RunningApplications : Panel
             // Keep the process handle, and never manage an unrelated or recycled PID.
             if (job.IsInvalid || !IsProcessInJob(process.SafeHandle, job, out bool member) || !member || process.HasExited) return;
             if (list.Items.Cast<Entry>().Any(entry => entry.Process.Id == pid && !entry.Process.HasExited)) return;
-            list.Items.Add(new Entry(name, process));
+            DateTime started;
+            try { started = process.StartTime; } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException) { started = DateTime.Now; }
+            list.Items.Add(new Entry(name, process, ProcessIcon(process, LogicalToDeviceUnits(32)), started));
             process = null;
             UpdateCount();
         }
@@ -75,8 +126,9 @@ sealed class RunningApplications : Panel
 
     void UpdateCount()
     {
-        title.Text = $"正在运行 ({list.Items.Count})";
-        FitWidth();
+        count.Text = list.Items.Count.ToString();
+        count.Type = list.Items.Count == 0 ? AntdUI.TTypeMini.Default : AntdUI.TTypeMini.Success;
+        FitWidth(); PerformLayout();
         timer.Enabled = list.Items.Count != 0;
     }
 
@@ -86,7 +138,7 @@ sealed class RunningApplications : Panel
         {
             var entry = (Entry)list.Items[i];
             if (!entry.Process.HasExited) continue;
-            list.Items.RemoveAt(i); entry.Process.Dispose();
+            list.Items.RemoveAt(i); entry.Process.Dispose(); entry.Icon?.Dispose();
         }
         UpdateCount();
     }
@@ -108,11 +160,11 @@ sealed class RunningApplications : Panel
         if (!SetForegroundWindow(window)) Feedback("Windows 未允许将此窗口切到前台。");
     }
 
-    void Feedback(string text) => MessageBox.Show(FindForm(), text, "正在运行的程序", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    void Feedback(string text) => MessageDialog.Show(FindForm(), text, "正在运行的程序", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { timer.Dispose(); menu.Dispose(); foreach (Entry item in list.Items) item.Process.Dispose(); }
+        if (disposing) { timer.Dispose(); menu.Dispose(); foreach (Entry item in list.Items) { item.Process.Dispose(); item.Icon?.Dispose(); } }
         base.Dispose(disposing);
     }
 

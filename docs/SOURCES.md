@@ -38,6 +38,7 @@ The launcher and its modifications are experimental. Upstream compatibility clai
 
 ## Windows 后台服务与参数枚举
 
+- UI controls: AntdUI 2.4.20, https://www.nuget.org/packages/AntdUI/2.4.20 ; Apache-2.0. Source: https://gitee.com/AntdUI/AntdUI , commit 81732455f15345e4d919eb412e1bd7a721bac674 (from NuGet metadata). License text retained in vendor/antdui/LICENSE.txt and packaged licenses/AntdUI-Apache-2.0.txt.
 - YAML parser: YamlDotNet 18.1.0, https://www.nuget.org/packages/YamlDotNet/18.1.0 ; MIT. NuGet metadata source commit: 748334a8fa7c227740018b284b71ad95cc6b7fc7. License retained in vendor/yamldotnet/LICENSE.txt and packaged licenses/YamlDotNet-MIT.txt.
 - Subscription formats: https://github.com/MetaCubeX/Meta-Docs/blob/main/docs/config/proxy-providers/content.en.md . Parsing is local; no online conversion service is used.
 

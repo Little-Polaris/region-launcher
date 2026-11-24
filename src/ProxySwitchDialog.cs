@@ -7,28 +7,33 @@ sealed class ProxySwitchDialog : Form
         public override string ToString() => Name;
     }
 
-    readonly ListBox choices = new() { Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true };
-    readonly Label status = new() { AutoSize = true, Dock = DockStyle.Fill };
-    readonly Button apply = new() { Text = "立即切换", Enabled = false, AutoSize = true, DialogResult = DialogResult.OK };
+    readonly ModernList choices = new() { Dock = DockStyle.Fill, AccessibleName = "可切换的节点", EmptyText = "没有可切换的节点", EmptyHint = "可从文件添加，或在订阅管理中获取" };
+    readonly AntdUI.Select sources = HomeTheme.Select();
+    readonly Label status = HomeTheme.Hint("");
+    readonly AntdUI.Button apply = HomeTheme.Action("立即切换", AntdUI.TTypeMini.Primary, "SwapOutlined");
     public JsonObject? SelectedNode => (choices.SelectedItem as Choice)?.Node;
     public string SelectedName => (choices.SelectedItem as Choice)?.Name ?? "";
 
     public ProxySwitchDialog(string configPath)
     {
-        Text = "切换节点"; Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new(620, 455); MinimumSize = new(540, 380);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(14), ColumnCount = 1, RowCount = 5 };
-        layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
+        HomeTheme.Dialog(this, "切换节点", new(620, 500), new(540, 400));
+        apply.Enabled = false; apply.DialogResult = DialogResult.OK;
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20, 18, 20, 4), ColumnCount = 1, RowCount = 4 };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "切换会关闭本环境的旧连接，正在运行的程序可重新连接。", AutoSize = true }, 0, 0);
-        var sources = new ComboBox { AccessibleName = "选择订阅来源", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+        layout.RowStyles.Add(new(SizeType.Percent, 100)); layout.RowStyles.Add(new(SizeType.AutoSize));
+        var intro = new AntdUI.Alert { Text = "切换会关闭本环境的旧连接，正在运行的程序可重新连接。", Icon = AntdUI.TType.Info,
+            Dock = DockStyle.Fill, Radius = 8, Margin = new(3, 0, 3, 8), Height = LogicalToDeviceUnits(40) };
+        layout.Controls.Add(intro, 0, 0);
+        sources.AccessibleName = "选择订阅来源"; sources.PrefixSvg = "CloudOutlined";
         layout.Controls.Add(sources, 0, 1);
-        layout.Controls.Add(choices, 0, 2);
+        var frame = new LogFrame(3, 6) { Dock = DockStyle.Fill, Fill = HomeTheme.Surface, Margin = Padding.Empty };
+        frame.Controls.Add(choices);
+        layout.Controls.Add(frame, 0, 2);
         layout.Controls.Add(status, 0, 3);
-        var import = new Button { Text = "从文件添加…", AutoSize = true };
-        var cancel = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
-        buttons.Controls.AddRange([import, apply, cancel]); layout.Controls.Add(buttons, 0, 4); Controls.Add(layout);
+        var import = HomeTheme.Action("从文件添加…", AntdUI.TTypeMini.Default, "FileAddOutlined");
+        var cancel = HomeTheme.Action("取消"); cancel.DialogResult = DialogResult.Cancel;
+        var buttons = HomeTheme.Footer(cancel, apply, import); buttons.Dock = DockStyle.Bottom;
+        Controls.Add(layout); Controls.Add(buttons);
         AcceptButton = apply; CancelButton = cancel;
         choices.SelectedIndexChanged += (_, _) => apply.Enabled = choices.SelectedItem is Choice;
 
@@ -51,7 +56,7 @@ sealed class ProxySwitchDialog : Form
             choices.Items.Add(restore);
             try
             {
-                var source = sources.SelectedItem as SavedSubscription;
+                var source = sources.SelectedValue as SavedSubscription;
                 var entries = source?.ReadNodes().Nodes ?? fromFile;
                 if (source == null && automatic)
                     entries = entries.Concat(Subscription.Parse(saved["members"]!.ToJsonString(), cached: true).Nodes).ToList();
@@ -65,8 +70,9 @@ sealed class ProxySwitchDialog : Form
             finally { choices.EndUpdate(); }
         }
         sources.SelectedIndexChanged += (_, _) => Populate();
-        sources.SelectedItem = library.Items.FirstOrDefault(x => x.Id == library.LastUsed);
-        if (sources.SelectedIndex < 0) sources.SelectedIndex = 0;
+        var last = library.Items.FirstOrDefault(x => x.Id == library.LastUsed);
+        sources.SelectedIndex = last == null ? 0 : sources.Items.IndexOf(last);
+        Populate();
 
         import.Click += (_, _) =>
         {

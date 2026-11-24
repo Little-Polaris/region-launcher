@@ -17,6 +17,7 @@ static class Program
             return;
         }
         ApplicationConfiguration.Initialize();
+        HomeTheme.Initialize();
         if (args.Length == 2 && args[0] == "--render-preview")
         {
             using var preview = new Launcher(); preview.StartPosition = FormStartPosition.Manual;
@@ -44,10 +45,8 @@ sealed class Launcher : Form
 {
     readonly FlowLayoutPanel tiles = new() { Dock = DockStyle.Fill, AutoScroll = true, AllowDrop = true, Padding = new(20, 8, 20, 20) };
     readonly RunningApplications running = new();
-    readonly Label homeStatus = new() { Dock = DockStyle.Fill, AutoSize = true, AutoEllipsis = true, ForeColor = HomeTheme.Muted };
-    readonly Button footer = new() { Text = "查看运行日志", AccessibleName = "查看运行日志", Dock = DockStyle.Bottom, AutoSize = true,
-        FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(234, 236, 241), ForeColor = HomeTheme.Muted,
-        TextAlign = ContentAlignment.MiddleLeft, Padding = new(22, 5, 0, 5), Cursor = Cursors.Hand };
+    readonly StatusLabel homeStatus = new() { Dock = DockStyle.Fill, AutoSize = true, AutoEllipsis = true, ForeColor = HomeTheme.Muted, Margin = new(0, 4, 0, 0) };
+    readonly AntdUI.Button footer = HomeTheme.Link("查看运行日志", "FileTextOutlined");
     string? launchingId;
     readonly ContextMenuStrip actions = new();
     readonly ToolStripMenuItem configureProxy = new("独立代理配置…");
@@ -85,17 +84,17 @@ sealed class Launcher : Form
         Text = "Region Launcher"; ClientSize = new(820, 560); MinimumSize = new(410, 390);
         Font = new("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(96, 96); AutoScaleMode = AutoScaleMode.Dpi; BackColor = HomeTheme.Background;
-        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(24, 12, 24, 6), ColumnCount = 2, RowCount = 3 };
+        var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(24, 16, 24, 8), ColumnCount = 2, RowCount = 3 };
         header.ColumnStyles.Add(new(SizeType.Percent, 100)); header.ColumnStyles.Add(new(SizeType.AutoSize));
         for (int row = 0; row < 3; row++) header.RowStyles.Add(new(SizeType.AutoSize));
         var title = new Label { Text = "Region Launcher", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft,
-            Font = new(Font.FontFamily, 16, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
+            Font = new(Font.FontFamily, 17, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
         var quick = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
-        var check = HomeTheme.Action("检测并修复"); check.Click += (_, _) => checkProxy.PerformClick();
-        var node = HomeTheme.Action("切换节点"); node.Click += (_, _) => switchProxy.PerformClick();
-        checkProxy.EnabledChanged += (_, _) => check.Enabled = checkProxy.Enabled;
+        var check = HomeTheme.Action("检测并修复", AntdUI.TTypeMini.Primary, "SafetyCertificateOutlined"); check.Click += (_, _) => checkProxy.PerformClick();
+        var node = HomeTheme.Action("切换节点", AntdUI.TTypeMini.Default, "SwapOutlined"); node.Click += (_, _) => switchProxy.PerformClick();
+        checkProxy.EnabledChanged += (_, _) => { check.Enabled = checkProxy.Enabled; check.Loading = !checkProxy.Enabled && preparing; };
         switchProxy.EnabledChanged += (_, _) => node.Enabled = switchProxy.Enabled;
-        var more = HomeTheme.Action("更多 ▾"); more.AccessibleName = "更多设置与工具";
+        var more = HomeTheme.Action("更多", AntdUI.TTypeMini.Default, "SettingOutlined"); more.AccessibleName = "更多设置与工具";
         more.Click += (_, _) => actions.Show(more, new Point(more.Width, more.Height + 2), ToolStripDropDownDirection.BelowLeft);
         quick.Controls.AddRange([check, node, more]);
         header.Controls.Add(title, 0, 0); header.Controls.Add(quick, 1, 0);
@@ -113,12 +112,20 @@ sealed class Launcher : Form
         header.SizeChanged += (_, _) => FitHeader();
         quick.SizeChanged += (_, _) => FitHeader();
         title.FontChanged += (_, _) => FitHeader();
-        footer.FlatAppearance.BorderSize = 0;
+        footer.AccessibleName = "查看运行日志"; footer.Dock = DockStyle.Left; footer.Margin = Padding.Empty;
         footer.Click += (_, _) => ShowRunLog();
-        Controls.Add(tiles); Controls.Add(running); Controls.Add(footer); Controls.Add(header);
+        var version = new Label { Text = "v" + Application.ProductVersion.Split('+')[0], AutoSize = false, Width = LogicalToDeviceUnits(90), Dock = DockStyle.Right,
+            ForeColor = HomeTheme.Subtle, TextAlign = ContentAlignment.MiddleRight, Padding = new(0, 0, 4, 0) };
+        var footerBar = new FooterStrip { Dock = DockStyle.Bottom, Height = LogicalToDeviceUnits(42), Padding = new(16, 4, 20, 4) };
+        footerBar.Controls.Add(footer); footerBar.Controls.Add(version);
+        Controls.Add(tiles); Controls.Add(running); Controls.Add(footerBar); Controls.Add(header);
         var openLogs = new ToolStripMenuItem("打开日志", null, (_, _) => OpenLogs());
         var showLog = new ToolStripMenuItem("查看运行日志", null, (_, _) => ShowRunLog());
         actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, showLog, openLogs]);
+        foreach (var (item, icon) in new (ToolStripMenuItem, string)[] { (configureProxy, "CloudServerOutlined"), (switchProxy, "SwapOutlined"),
+            (checkProxy, "SafetyCertificateOutlined"), (linkBrowser, "GlobalOutlined"), (probe, "ExperimentOutlined"), (showLog, "FileTextOutlined"), (openLogs, "FolderOpenOutlined") })
+            item.Image = HomeTheme.Icon(icon, LogicalToDeviceUnits(16), HomeTheme.Muted);
+        HomeTheme.Apply(actions); HomeTheme.Apply(trayMenu);
         tiles.DragEnter += (_, e) => e.Effect = tiles.Enabled && DroppedExecutable(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
         tiles.DragDrop += (_, e) => {
             if (tiles.Enabled && DroppedExecutable(e) is string file)
@@ -175,7 +182,7 @@ sealed class Launcher : Form
         RefreshSoftware();
         RefreshProxy();
         Append($"启动器版本 {Application.ProductVersion}，PID={Environment.ProcessId}；日志目录：{Path.Combine(data, "logs")}");
-        if (logError != null) Shown += (_, _) => MessageBox.Show(this, logError, "日志文件不可写", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        if (logError != null) Shown += (_, _) => MessageDialog.Show(this, logError, "日志文件不可写", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
     protected override void OnLoad(EventArgs e)
     {
@@ -200,11 +207,15 @@ sealed class Launcher : Form
     }
     internal Form CreateRunLog()
     {
-        var dialog = new Form { Text = "运行日志", Font = Font, ClientSize = new(760, 450), MinimumSize = new(400, 280),
-            StartPosition = FormStartPosition.CenterParent, Icon = windowIcon, ShowInTaskbar = false };
-        var log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false };
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new(8) };
-        var refresh = HomeTheme.Action("刷新");
+        var dialog = new Form { Icon = windowIcon };
+        HomeTheme.Dialog(dialog, "运行日志", new(820, 500), new(420, 300));
+        var log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false,
+            BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(250, 251, 252), ForeColor = HomeTheme.Text, Font = new("Consolas", 9.5f) };
+        var frame = new LogFrame { Dock = DockStyle.Fill };
+        frame.Controls.Add(log);
+        var refresh = HomeTheme.Action("刷新", AntdUI.TTypeMini.Default, "ReloadOutlined");
+        var close = HomeTheme.Action("关闭", AntdUI.TTypeMini.Primary); close.DialogResult = DialogResult.Cancel;
+        dialog.CancelButton = close;
         void LoadTail()
         {
             try { log.Text = diagnostics?.ReadTail() ?? "当前运行日志不可用。"; }
@@ -212,9 +223,9 @@ sealed class Launcher : Form
             log.SelectionStart = log.TextLength; log.ScrollToCaret();
         }
         refresh.Click += (_, _) => LoadTail();
-        var folder = HomeTheme.Action("打开日志文件夹"); folder.Click += (_, _) => OpenLogs();
-        buttons.Controls.AddRange([refresh, folder]);
-        dialog.Controls.Add(log); dialog.Controls.Add(buttons); LoadTail();
+        var folder = HomeTheme.Action("打开日志文件夹", AntdUI.TTypeMini.Default, "FolderOpenOutlined"); folder.Click += (_, _) => OpenLogs();
+        var buttons = HomeTheme.Footer(close, folder, refresh); buttons.Dock = DockStyle.Bottom;
+        dialog.Controls.Add(frame); dialog.Controls.Add(buttons); LoadTail();
         return dialog;
     }
     void OpenLogs()
@@ -225,7 +236,7 @@ sealed class Launcher : Form
         }
         catch (Exception ex) {
             Append("无法打开日志目录：" + ex.Message);
-            MessageBox.Show(this, ex.Message, "无法打开日志目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageDialog.Show(this, ex.Message, "无法打开日志目录", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
     void RefreshProxy()
@@ -269,6 +280,8 @@ sealed class Launcher : Form
         checkProxy.Enabled = !preparing;
         foreach (var tile in tiles.Controls.OfType<ApplicationTile>())
             tile.SetBusy(preparing && launchingId != null && launchingId == (tile.Tag as LaunchApplication)?.Id);
+        homeStatus.Dot = applicationList == null ? HomeTheme.Danger : preparing ? HomeTheme.Accent :
+            !dedicatedProxy.Configured ? HomeTheme.Warning : HomeTheme.Success;
         homeStatus.Text = applicationList == null ? "软件列表读取失败 · 请查看运行日志" :
             $"{applicationList.Applications.Count} 个程序  ·  {(dedicatedProxy.Configured ? "代理已配置" : "代理未配置")}  ·  {(preparing ? "正在准备…" : session != null ? "环境运行中" : "就绪")}";
     }
@@ -288,7 +301,7 @@ sealed class Launcher : Form
             if (!shutdown.IsCancellationRequested)
             {
                 Append("切换节点失败：" + ex.Message);
-                MessageBox.Show(this, ex.Message, "切换节点失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageDialog.Show(this, ex.Message, "切换节点失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
         finally { EndPreparation(operation); }
@@ -317,11 +330,13 @@ sealed class Launcher : Form
                     var tile = new ApplicationTile(entry);
                     tile.Click += async (_, _) => await TrackOperation(() => StartSession(entry));
                     var menu = new ContextMenuStrip();
-                    menu.Items.Add("启动", null, async (_, _) => await TrackOperation(() => StartSession(entry)));
-                    menu.Items.Add("编辑程序与地区…", null, (_, _) => EditSoftware(entry));
-                    menu.Items.Add("打开所在文件夹", null, (_, _) => RevealApplication(entry));
+                    Image? MenuIcon(string name, Color? color = null) => HomeTheme.Icon(name, LogicalToDeviceUnits(16), color ?? HomeTheme.Muted);
+                    menu.Items.Add("启动", MenuIcon("CaretRightOutlined", HomeTheme.Accent), async (_, _) => await TrackOperation(() => StartSession(entry)));
+                    menu.Items.Add("编辑程序与地区…", MenuIcon("EditOutlined"), (_, _) => EditSoftware(entry));
+                    menu.Items.Add("打开所在文件夹", MenuIcon("FolderOpenOutlined"), (_, _) => RevealApplication(entry));
                     menu.Items.Add(new ToolStripSeparator());
-                    menu.Items.Add("删除软件…", null, (_, _) => RemoveSoftware(entry));
+                    menu.Items.Add("删除软件…", MenuIcon("DeleteOutlined", HomeTheme.Danger), (_, _) => RemoveSoftware(entry));
+                    HomeTheme.Apply(menu);
                     tile.ContextMenuStrip = menu;
                     tiles.Controls.Add(tile);
                 }
@@ -349,7 +364,7 @@ sealed class Launcher : Form
     void SaveSoftwareList(ApplicationList updated)
     {
         try { library.Save(updated); applicationList = updated; RefreshSoftware(); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存软件列表", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        catch (Exception ex) { MessageDialog.Show(this, ex.Message, "无法保存软件列表", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
     void RevealApplication(LaunchApplication entry)
     {
@@ -359,13 +374,13 @@ sealed class Launcher : Form
             using var process = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
         } catch (Exception ex) {
             Append("无法打开所在文件夹：" + ex.Message);
-            MessageBox.Show(this, ex.Message, "无法打开所在文件夹", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageDialog.Show(this, ex.Message, "无法打开所在文件夹", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
     void RemoveSoftware(LaunchApplication entry)
     {
         if (preparing || applicationList == null) return;
-        if (MessageBox.Show(this, $"从列表中删除“{entry.Name}”？这不会卸载软件或删除其文件。", "删除软件", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+        if (MessageDialog.Show(this, $"从列表中删除“{entry.Name}”？这不会卸载软件或删除其文件。", "删除软件", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
         var entries = applicationList.Applications.Where(a => a.Id != entry.Id).ToList();
         SaveSoftwareList(applicationList with { SelectedId = entries.FirstOrDefault()?.Id, Applications = entries });
     }
@@ -407,7 +422,7 @@ sealed class Launcher : Form
         string message = error != null ? "本次检测或修复未通过。\n\n" + error + "\n\n请从右上角菜单打开日志查看详情。" : detail;
         Append(title);
         RestoreWindow();
-        MessageBox.Show(this, message, title, MessageBoxButtons.OK, error != null ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        MessageDialog.Show(this, message, title, MessageBoxButtons.OK, error != null ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
     }
     async Task StartSession(LaunchApplication selected)
     {
@@ -487,7 +502,7 @@ sealed class Launcher : Form
         if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
         string message = $"“{applicationName}”未能启动。请从启动器右上角菜单打开日志查看失败原因。";
         if (Visible && WindowState != FormWindowState.Minimized)
-            MessageBox.Show(this, message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageDialog.Show(this, message, "启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
         else {
             tray.BalloonTipTitle = "Region Launcher · 启动失败";
             tray.BalloonTipText = message.Length > 240 ? message[..237] + "…" : message;

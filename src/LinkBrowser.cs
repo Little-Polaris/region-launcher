@@ -80,19 +80,19 @@ static class LinkBrowser
 sealed class LinkBrowserDialog : Form
 {
     public LinkBrowserDialog(string data, ApplicationList? library) {
-        Text = "授权链接浏览器"; Font = new("Microsoft YaHei UI", 10); ClientSize = new(650, 250);
-        StartPosition = FormStartPosition.CenterParent; MinimizeBox = MaximizeBox = false;
-        var list = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Top };
+        HomeTheme.Dialog(this, "授权链接浏览器", new(650, 330), new(520, 300));
+        MinimizeBox = MaximizeBox = false;
+        var list = HomeTheme.Select(); list.Dock = DockStyle.Top; list.PrefixSvg = "GlobalOutlined"; list.AccessibleName = "授权链接浏览器";
         list.Items.AddRange(LinkBrowser.Choices(library).Cast<object>().ToArray());
         string path = Path.Combine(data, "link-browser.json");
         var selected = File.Exists(path) ? JsonSerializer.Deserialize<LinkBrowserSelection>(File.ReadAllText(path)) : null;
-        list.SelectedItem = list.Items.Cast<LinkBrowserChoice>().FirstOrDefault(c => c.Id == selected?.Choice) ?? list.Items[0];
-        var hint = new Label { Dock = DockStyle.Fill, Padding = new(0, 15, 0, 0), Text = "优先使用软件列表中带独立资料目录的 Chrome / Edge。\n同一运行环境内已打开的实例可以直接复用。\n没有独立配置，或它被外部实例占用时，使用临时资料和无痕窗口。\n临时资料在环境结束后清理；已保存的资料不会删除。\n选择后从下次启动程序生效，不修改系统默认浏览器。" };
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
-        var save = new Button { Text = "保存", AutoSize = true }; var cancel = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
-        save.Click += (_, _) => { try { Directory.CreateDirectory(data); File.WriteAllText(path, JsonSerializer.Serialize(new LinkBrowserSelection { Choice = ((LinkBrowserChoice)list.SelectedItem!).Id }, new JsonSerializerOptions { WriteIndented = true })); DialogResult = DialogResult.OK; } catch (Exception ex) { MessageBox.Show(this, ex.Message, "无法保存"); } };
-        buttons.Controls.Add(cancel); buttons.Controls.Add(save);
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = new(16) }; panel.Controls.Add(hint); panel.Controls.Add(list); panel.Controls.Add(buttons); Controls.Add(panel);
+        list.SelectedValue = list.Items.Cast<object>().OfType<LinkBrowserChoice>().FirstOrDefault(c => c.Id == selected?.Choice) ?? list.Items[0];
+        var hint = new Label { Dock = DockStyle.Fill, Padding = new(2, 14, 0, 0), ForeColor = HomeTheme.Muted, Text = "· 优先使用软件列表中带独立资料目录的 Chrome / Edge。\n· 同一运行环境内已打开的实例可以直接复用。\n· 没有独立配置，或它被外部实例占用时，使用临时资料和无痕窗口。\n· 临时资料在环境结束后清理；已保存的资料不会删除。\n· 选择后从下次启动程序生效，不修改系统默认浏览器。" };
+        var save = HomeTheme.Action("保存", AntdUI.TTypeMini.Primary, "CheckOutlined"); var cancel = HomeTheme.Action("取消"); cancel.DialogResult = DialogResult.Cancel;
+        save.Click += (_, _) => { try { Directory.CreateDirectory(data); File.WriteAllText(path, JsonSerializer.Serialize(new LinkBrowserSelection { Choice = ((LinkBrowserChoice)list.SelectedValue!).Id }, new JsonSerializerOptions { WriteIndented = true })); DialogResult = DialogResult.OK; } catch (Exception ex) { MessageDialog.Show(this, ex.Message, "无法保存", MessageBoxButtons.OK, MessageBoxIcon.Warning); } };
+        var buttons = HomeTheme.Footer(cancel, save); buttons.Dock = DockStyle.Bottom;
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = new(24, 20, 24, 8) }; panel.Controls.Add(hint); panel.Controls.Add(list);
+        Controls.Add(panel); Controls.Add(buttons);
         AcceptButton = save; CancelButton = cancel;
     }
 }

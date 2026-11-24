@@ -85,7 +85,7 @@ def main():
             assert all(x.get('country_code', '').lower() == 'us' for x in results['dns']), results['dns']
             print('PASS: chrome.exe native DNS witness reports US resolvers', flush=True)
             shutil.copy2(BIN/'RegionLauncher.exe', app)
-            for name in ('RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll'):
+            for name in ('RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','AntdUI.dll'):
                 destination = OUT/name; generated.append(destination); shutil.copy2(BIN/name, destination)
             report = OUT/'https.json'
             session('https', app, ['--network-probe', str(report)])

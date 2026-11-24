@@ -15,6 +15,7 @@ with zipfile.ZipFile(args.archive) as archive:
         'app/RegionLauncher.exe', 'app/RegionLauncher.dll',
         'app/RegionLauncher.deps.json', 'app/RegionLauncher.runtimeconfig.json',
         'app/YamlDotNet.dll', 'app/licenses/YamlDotNet-MIT.txt',
+        'app/AntdUI.dll', 'app/licenses/AntdUI-Apache-2.0.txt',
         'app/proxy/mihomo.exe', 'app/proxy/LICENSE', 'docs/quick-start.md',
         'docs/validation-lifecycle-20261109.md',
         'docs/proxy-settings.md',

@@ -10,7 +10,7 @@ $packages = Join-Path $output 'packages'
 $licenses = Join-Path $app 'licenses'
 $version = ([xml](Get-Content "$root/src/RegionLauncher.csproj" -Raw)).Project.PropertyGroup.Version
 New-Item -ItemType Directory -Force -Path $app,$docs,$packages,$licenses | Out-Null
-$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','RegionSession.exe','RegionHook.dll','RegionHook32.dll','RegionInject32.exe','RegionInject64.exe','RegionProbe.exe','RegionProbe32.exe','DnsProbe.exe','DnsProbe32.exe')
+$files = @('RegionLauncher.exe','RegionLauncher.dll','RegionLauncher.deps.json','RegionLauncher.runtimeconfig.json','YamlDotNet.dll','AntdUI.dll','RegionSession.exe','RegionHook.dll','RegionHook32.dll','RegionInject32.exe','RegionInject64.exe','RegionProbe.exe','RegionProbe32.exe','DnsProbe.exe','DnsProbe32.exe')
 foreach ($file in $files) {
     $from = Join-Path $bin $file; $to = Join-Path $app $file
     if (!(Test-Path $to) -or (Get-FileHash $from).Hash -ne (Get-FileHash $to).Hash) {
@@ -28,6 +28,7 @@ if (Test-Path "$bin/proxy") {
 }
 Copy-Item -LiteralPath "$root/LICENSE" -Destination "$licenses/RegionLauncher-MIT.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/yamldotnet/LICENSE.txt" -Destination "$licenses/YamlDotNet-MIT.txt" -Force
+Copy-Item -LiteralPath "$root/vendor/antdui/LICENSE.txt" -Destination "$licenses/AntdUI-Apache-2.0.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/detours/LICENSE.md" -Destination "$licenses/Detours-MIT.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/proxybridge/LICENSE" -Destination "$licenses/ProxyBridge-MIT.txt" -Force
 Copy-Item -LiteralPath "$root/vendor/windivert/WinDivert-2.2.2-A/LICENSE" -Destination "$licenses/WinDivert-LICENSE.txt" -Force

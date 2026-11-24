@@ -2,23 +2,24 @@ using System.Text.Json.Nodes;
 
 sealed class ProxySettingsDialog : Form
 {
-    readonly ComboBox protocol = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    readonly TextBox server = new() { Dock = DockStyle.Fill };
-    readonly NumericUpDown remotePort = new() { Minimum = 1, Maximum = 65535, Value = 443, Dock = DockStyle.Fill };
-    readonly NumericUpDown localPort = new() { Minimum = 1024, Maximum = 65535, Value = 17890, Dock = DockStyle.Fill };
-    readonly TextBox uuid = new() { Dock = DockStyle.Fill };
-    readonly TextBox password = new() { UseSystemPasswordChar = true, Dock = DockStyle.Fill };
-    readonly TextBox sni = new() { Dock = DockStyle.Fill };
-    readonly ComboBox cipher = new() { Dock = DockStyle.Fill };
-    readonly CheckBox tls = new() { Text = "启用 TLS", AutoSize = true, Checked = true };
-    readonly CheckBox skipVerify = new() { Text = "跳过证书验证（仅节点明确要求时使用）", AutoSize = true };
-    readonly TextBox advanced = new() { Multiline = true, ScrollBars = ScrollBars.Both, AcceptsTab = true, WordWrap = false, Dock = DockStyle.Fill, Text = "{}" };
-    readonly Label status = new() { AutoSize = true, Dock = DockStyle.Fill, MaximumSize = new(620, 0) };
-    readonly Button save = new() { Text = "校验并保存", AutoSize = true };
-    readonly Button validate = new() { Text = "校验配置", AutoSize = true };
-    readonly Button import = new() { Text = "导入文件…", AutoSize = true };
-    readonly Button subscription = new() { Text = "订阅 / 选节点或组…", AutoSize = true };
-    readonly TabControl tabs = new() { Dock = DockStyle.Fill };
+    readonly AntdUI.Select protocol = HomeTheme.Select();
+    readonly AntdUI.Input server = HomeTheme.Input("域名或 IP");
+    readonly AntdUI.InputNumber remotePort = new() { Minimum = 1, Maximum = 65535, Value = 443, Anchor = AnchorStyles.Left | AnchorStyles.Right, AutoSizeMode = AntdUI.TAutoSize.Height, Radius = 8, WaveSize = 3 };
+    readonly AntdUI.InputNumber localPort = new() { Minimum = 1024, Maximum = 65535, Value = 17890, Anchor = AnchorStyles.Left | AnchorStyles.Right, AutoSizeMode = AntdUI.TAutoSize.Height, Radius = 8, WaveSize = 3 };
+    readonly AntdUI.Input uuid = HomeTheme.Input();
+    readonly AntdUI.Input password = HomeTheme.Input();
+    readonly AntdUI.Input sni = HomeTheme.Input("留空则使用服务器地址");
+    readonly AntdUI.Select cipher = HomeTheme.Select();
+    readonly AntdUI.Checkbox tls = new() { Text = "启用 TLS", AutoSizeMode = AntdUI.TAutoSize.Auto, Checked = true };
+    readonly AntdUI.Checkbox skipVerify = new() { Text = "跳过证书验证（仅节点明确要求时使用）", AutoSizeMode = AntdUI.TAutoSize.Auto };
+    readonly TextBox advanced = new() { Multiline = true, ScrollBars = ScrollBars.Both, AcceptsTab = true, WordWrap = false, Dock = DockStyle.Fill, Text = "{}",
+        BorderStyle = BorderStyle.None, Font = new("Consolas", 10f) };
+    readonly Label status = HomeTheme.Hint("");
+    readonly AntdUI.Button save = HomeTheme.Action("校验并保存", AntdUI.TTypeMini.Primary, "CheckOutlined");
+    readonly AntdUI.Button validate = HomeTheme.Action("校验配置", AntdUI.TTypeMini.Default, "SafetyCertificateOutlined");
+    readonly AntdUI.Button import = HomeTheme.Action("导入文件…", AntdUI.TTypeMini.Default, "FileAddOutlined");
+    readonly AntdUI.Button subscription = HomeTheme.Action("订阅 / 选节点或组…", AntdUI.TTypeMini.Default, "CloudDownloadOutlined");
+    readonly AntdUI.Tabs tabs = new() { Dock = DockStyle.Fill };
     readonly Dictionary<Control, Label> fieldLabels = new();
     readonly DedicatedProxy proxy;
     bool working;
@@ -30,40 +31,47 @@ sealed class ProxySettingsDialog : Form
     public ProxySettingsDialog(DedicatedProxy proxy)
     {
         this.proxy = proxy;
-        Text = "独立代理配置"; Font = new("Microsoft YaHei UI", 10);
-        ClientSize = new(760, 760); MinimumSize = new(680, 690); StartPosition = FormStartPosition.CenterParent;
+        HomeTheme.Dialog(this, "独立代理配置", new(760, 780), new(680, 700));
         MaximizeBox = false; MinimizeBox = false;
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), ColumnCount = 1, RowCount = 4 };
+        password.UseSystemPasswordChar = true; cipher.List = false;
+        server.PrefixSvg = "GlobalOutlined"; password.PrefixSvg = "LockOutlined"; uuid.PrefixSvg = "KeyOutlined";
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20, 16, 20, 4), ColumnCount = 1, RowCount = 3 };
         layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.Percent, 100));
-        layout.RowStyles.Add(new(SizeType.AutoSize)); layout.RowStyles.Add(new(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "选择固定节点，或导入自动故障切换组作为环境的独立出口。\n保存后下次启动生效；节点凭据仅保存在本机，请勿分享配置文件。", AutoSize = true, Padding = new(0, 0, 0, 12) }, 0, 0);
+        layout.RowStyles.Add(new(SizeType.AutoSize));
+        layout.Controls.Add(new AntdUI.Alert { TextTitle = "选择固定节点，或导入自动故障切换组作为环境的独立出口",
+            Text = "保存后下次启动生效；节点凭据仅保存在本机，请勿分享配置文件。",
+            Icon = AntdUI.TType.Info, Radius = 8, Dock = DockStyle.Fill, Height = LogicalToDeviceUnits(66), Margin = new(3, 0, 3, 10) }, 0, 0);
         layout.Controls.Add(tabs, 0, 1);
-        var basic = new TabPage("节点设置"); var extra = new TabPage("高级选项"); tabs.TabPages.AddRange([basic, extra]);
-        tabs.Selecting += (_, e) => { if (failover != null && e.TabPage == extra) e.Cancel = true; };
-        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12), ColumnCount = 2, AutoScroll = true };
-        grid.ColumnStyles.Add(new(SizeType.Absolute, 165)); grid.ColumnStyles.Add(new(SizeType.Percent, 100));
+        var basic = new AntdUI.TabPage { Text = "节点设置", IconSvg = "NodeIndexOutlined" }; var extra = new AntdUI.TabPage { Text = "高级选项", IconSvg = "CodeOutlined" };
+        tabs.Pages.Add(basic); tabs.Pages.Add(extra);
+        tabs.SelectedIndexChanging += (_, e) => { if (failover != null && e.Value == 1) e.Cancel = true; };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12, 14, 12, 12), ColumnCount = 2, AutoScroll = true };
+        grid.ColumnStyles.Add(new(SizeType.Absolute, 150)); grid.ColumnStyles.Add(new(SizeType.Percent, 100));
         void Row(string label, Control control)
         {
             int row = grid.RowCount++; grid.RowStyles.Add(new(SizeType.AutoSize));
-            var caption = new Label { Text = label, AutoSize = true, Padding = new(0, 7, 0, 7) };
+            var caption = HomeTheme.Caption(label);
             fieldLabels.Add(control, caption); grid.Controls.Add(caption, 0, row);
-            control.Margin = new(3, 5, 3, 5); grid.Controls.Add(control, 1, row); control.AccessibleName = label;
+            control.Margin = new(3, 4, 3, 4); grid.Controls.Add(control, 1, row); control.AccessibleName = label;
         }
-        protocol.Items.AddRange(["Hysteria2", "VLESS", "VMess", "Trojan", "Shadowsocks", "TUIC", "AnyTLS"]);
-        cipher.Items.AddRange(["aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"]);
+        protocol.Items.AddRange(new object[] { "Hysteria2", "VLESS", "VMess", "Trojan", "Shadowsocks", "TUIC", "AnyTLS" });
+        cipher.Items.AddRange(new object[] { "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305" });
         cipher.Text = "aes-128-gcm";
         Row("代理出口", protocol); Row("服务器地址", server); Row("服务器端口", remotePort);
         Row("UUID", uuid); Row("密码", password); Row("加密方式", cipher);
         Row("TLS", tls); Row("服务器名 (SNI)", sni); Row("证书", skipVerify); Row("独立本地端口", localPort);
+        grid.RowStyles.Add(new(SizeType.Percent, 100)); grid.RowCount++; // absorbs spare height so fields stay packed at the top
         basic.Controls.Add(grid);
-        var advancedLayout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(12), RowCount = 2, ColumnCount = 1 };
+        var advancedLayout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(8, 12, 8, 4), RowCount = 2, ColumnCount = 1 };
         advancedLayout.RowStyles.Add(new(SizeType.AutoSize)); advancedLayout.RowStyles.Add(new(SizeType.Percent, 100));
-        advancedLayout.Controls.Add(new Label { Text = "填写额外节点参数的 JSON 对象，例如 Reality、WebSocket、gRPC、ALPN、混淆或 TUIC token。\n基础字段请在“节点设置”中填写；不要粘贴整份路由或订阅配置。", AutoSize = true, MaximumSize = new(620, 0), Padding = new(0, 0, 0, 10) }, 0, 0);
-        advancedLayout.Controls.Add(advanced, 0, 1); extra.Controls.Add(advancedLayout);
-        status.Padding = new(0, 8, 0, 8); layout.Controls.Add(status, 0, 2);
-        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        var cancel = new Button { Text = "取消", AutoSize = true, DialogResult = DialogResult.Cancel };
-        actions.Controls.AddRange([subscription, import, validate, save, cancel]); layout.Controls.Add(actions, 0, 3); Controls.Add(layout);
+        var advancedHint = HomeTheme.Hint("填写额外节点参数的 JSON 对象，例如 Reality、WebSocket、gRPC、ALPN、混淆或 TUIC token。\n基础字段请在“节点设置”中填写；不要粘贴整份路由或订阅配置。");
+        advancedHint.MaximumSize = new(620, 0); advancedLayout.Controls.Add(advancedHint, 0, 0);
+        var editor = new LogFrame(3, 10) { Dock = DockStyle.Fill, Margin = Padding.Empty }; editor.Controls.Add(advanced);
+        advancedLayout.Controls.Add(editor, 0, 1); extra.Controls.Add(advancedLayout);
+        status.Margin = new(3, 8, 3, 8); status.MaximumSize = new(680, 0); layout.Controls.Add(status, 0, 2);
+        var cancel = HomeTheme.Action("取消"); cancel.DialogResult = DialogResult.Cancel;
+        var actions = HomeTheme.Footer(cancel, save, validate, import, subscription); actions.Dock = DockStyle.Bottom;
+        Controls.Add(layout); Controls.Add(actions);
         CancelButton = cancel;
         protocol.SelectedIndexChanged += (_, _) =>
         {
@@ -74,7 +82,7 @@ sealed class ProxySettingsDialog : Form
                 protocol.Items.RemoveAt(ProxyConfiguration.Protocols.Length);
                 status.Text = "";
             }
-            advanced.Text = "{}"; uuid.Clear(); password.Clear(); cipher.Text = Type == "vmess" ? "auto" : "aes-128-gcm"; tls.Checked = true; skipVerify.Checked = false;
+            advanced.Text = "{}"; uuid.Text = ""; password.Text = ""; cipher.Text = Type == "vmess" ? "auto" : "aes-128-gcm"; tls.Checked = true; skipVerify.Checked = false;
             UpdateFields();
         };
         protocol.SelectedIndex = 0;
@@ -144,7 +152,7 @@ sealed class ProxySettingsDialog : Form
                 protocol.Items.Add($"{node["name"]} · 自动故障切换（{node["members"]!.AsArray().Count} 个节点）");
                 protocol.SelectedIndex = index;
                 tabs.SelectedIndex = 0;
-                server.Clear(); uuid.Clear(); password.Clear(); advanced.Text = "{}";
+                server.Text = ""; uuid.Text = ""; password.Text = ""; advanced.Text = "{}";
                 status.Text = "Mihomo 按导入顺序选择可用节点。校验并保存后生效。";
                 UpdateFields();
                 return;
@@ -187,13 +195,13 @@ sealed class ProxySettingsDialog : Form
         try
         {
             var config = ReadConfig();
-            tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = false;
+            tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = false; (commit ? save : validate).Loading = true;
             await ProxyConfiguration.ValidateAndSave(config, proxy.ConfigPath, proxy.EnginePath, commit);
             if (commit) { proxy.Dispose(); saved = true; }
             else status.Text = "配置校验通过；尚未连接服务器。保存后可在主窗口检测代理。";
         }
         catch (Exception ex) { status.Text = ex is IOException ? ex.Message : "校验或保存失败，未应用新配置；请检查字段、文件权限和代理内核。"; }
-        finally { working = false; tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = true; }
+        finally { working = false; save.Loading = validate.Loading = false; tabs.Enabled = subscription.Enabled = import.Enabled = validate.Enabled = save.Enabled = true; }
         if (saved) { DialogResult = DialogResult.OK; Close(); }
     }
 }
