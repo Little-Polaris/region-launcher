@@ -2,9 +2,20 @@ using System.Text.Json.Nodes;
 
 sealed class ProxySwitchDialog : Form
 {
-    internal sealed record Choice(string Name, JsonObject? Node, bool IsCurrent = false, int? DelayMs = null, bool Measured = false)
+    internal sealed record Choice(string Name, JsonObject? Node, bool IsCurrent = false, int? DelayMs = null, bool Measured = false, bool Pending = false)
     {
-        public override string ToString() => Name + (Measured ? DelayMs is int ms ? $"  ·  {ms} ms" : "  ·  不可用" : "");
+        public override string ToString() => Name;
+    }
+
+    // Right-hand tags: delay (green fast, amber slow, red very slow or unreachable), then "当前" for the node in use.
+    static IEnumerable<(string, Color)> Tags(Choice choice)
+    {
+        if (choice.Pending) yield return ("测速中…", HomeTheme.Subtle);
+        else if (choice.Measured)
+            yield return choice.DelayMs is int ms
+                ? ($"{ms} ms", ms < 300 ? HomeTheme.Success : ms < 800 ? HomeTheme.Warning : HomeTheme.Danger)
+                : ("不可用", HomeTheme.Danger);
+        if (choice.IsCurrent) yield return ("当前", HomeTheme.Accent);
     }
 
     internal static JsonObject NormalizedNode(JsonObject node)
@@ -41,7 +52,8 @@ sealed class ProxySwitchDialog : Form
         layout.Controls.Add(status, 0, 3);
         var import = HomeTheme.Action("从文件添加…", AntdUI.TTypeMini.Default, "FileAddOutlined");
         var cancel = HomeTheme.Action("取消"); cancel.DialogResult = DialogResult.Cancel;
-        var latency = HomeTheme.Action("测延迟"); latency.Enabled = measure != null;
+        var latency = HomeTheme.Action("测延迟", AntdUI.TTypeMini.Default, "ThunderboltOutlined"); latency.Enabled = measure != null;
+        choices.Tags = item => item is Choice choice ? Tags(choice) : null;
         CancellationTokenSource? measuring = null;
         var measured = new Dictionary<string, int?>();
         var buttons = HomeTheme.Footer(cancel, apply, import, latency); buttons.Dock = DockStyle.Bottom;
@@ -110,14 +122,20 @@ sealed class ProxySwitchDialog : Form
             using var tokenSource = new CancellationTokenSource();
             measuring = tokenSource;
             latency.Enabled = import.Enabled = sources.Enabled = apply.Enabled = false;
+            latency.Loading = true;
             status.Text = "正在测量当前列表的节点…";
+            int keep = choices.SelectedIndex;
+            choices.BeginUpdate();
+            foreach (var row in rows) choices.Items[row.Index] = row.Choice with { Pending = true };
+            choices.SelectedIndex = keep;
+            choices.EndUpdate();
             try {
                 var progress = new Progress<(int Index, int? DelayMs)>(result => {
                     if (IsDisposed || tokenSource.IsCancellationRequested) return;
                     var row = rows[result.Index];
                     measured[row.Choice.Node!.ToJsonString()] = result.DelayMs;
                     int selected = choices.SelectedIndex;
-                    choices.Items[row.Index] = row.Choice with { Measured = true, DelayMs = result.DelayMs };
+                    choices.Items[row.Index] = row.Choice with { Measured = true, DelayMs = result.DelayMs, Pending = false };
                     choices.SelectedIndex = selected;
                 });
                 await measure(rows.Select(row => row.Choice.Node!).ToArray(), progress, tokenSource.Token);
@@ -127,6 +145,12 @@ sealed class ProxySwitchDialog : Form
             finally {
                 measuring = null;
                 if (!IsDisposed) {
+                    // Rows a cancelled or failed run never reached go back to their previous state.
+                    int keep2 = choices.SelectedIndex;
+                    for (int i = 0; i < choices.Items.Count; i++)
+                        if (choices.Items[i] is Choice { Pending: true } pending) choices.Items[i] = pending with { Pending = false };
+                    choices.SelectedIndex = keep2;
+                    latency.Loading = false;
                     latency.Enabled = import.Enabled = sources.Enabled = true;
                     apply.Enabled = choices.SelectedItem is Choice { IsCurrent: false };
                 }

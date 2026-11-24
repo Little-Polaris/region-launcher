@@ -181,6 +181,8 @@ class ModernList : ListBox
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] public Func<object, string?>? Detail { get; set; }
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] public Func<object, Image?>? ItemIcon { get; set; }
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] public Func<object, Color?>? Dot { get; set; }
+    /// <summary>Small rounded labels drawn at the right of a row (for example a status or a measurement), rightmost first.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] public Func<object, IEnumerable<(string Text, Color Color)>?>? Tags { get; set; }
 
     public ModernList()
     {
@@ -264,6 +266,22 @@ class ModernList : ListBox
             using var brush = new SolidBrush(dot);
             graphics.FillEllipse(brush, right - size, row.Y + (row.Height - size) / 2, size, size);
             right -= size + S(8);
+        }
+        if (Tags?.Invoke(item) is { } tags) {
+            using var tagFont = new Font(Font.FontFamily, Math.Max(7.5f, Font.SizeInPoints - 2f));
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var (label, color) in tags) {
+                var size = TextRenderer.MeasureText(graphics, label, tagFont, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                int width = size.Width + S(14), height = size.Height + S(6);
+                var pill = new RectangleF(right - width, row.Y + (row.Height - height) / 2f, width, height);
+                using (var path = HomeTheme.Rounded(pill, height / 2))
+                using (var fill = new SolidBrush(Color.FromArgb(26, color)))
+                using (var edge = new Pen(Color.FromArgb(90, color))) { graphics.FillPath(fill, path); graphics.DrawPath(edge, path); }
+                TextRenderer.DrawText(graphics, label, tagFont, Rectangle.Round(pill), color,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+                right -= width + S(6);
+            }
+            right -= S(4);
         }
         string text = item.ToString() ?? "";
         string? detail = Detail?.Invoke(item);
