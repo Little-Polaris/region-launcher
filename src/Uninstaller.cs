@@ -59,7 +59,7 @@ static class Uninstaller
     internal static bool Remove(string root, bool deleteData, Action<string> report)
     {
         bool complete = true;
-        if (!Installation.SkipService && Installation.Service(root) != Installation.ServiceState.NotInstalled) {
+        if (!Installation.SkipService && Installation.ServiceRegistered()) {
             report("正在卸载后台网络服务，请在 Windows 管理员确认窗口中选择“是”…");
             if (Installation.RequestService(root, uninstall: true) is { } error) { complete = false; report("后台网络服务未卸载：" + error); }
             else report("后台网络服务已卸载。");

@@ -87,17 +87,21 @@ sealed class SetupWizard : Form
     {
         content.Controls.Add(Heading("后台网络服务"));
         content.Controls.Add(Body("后台服务负责接管所选程序的网络连接。安装或更新需要一次 Windows 管理员确认，之后日常使用无需管理员权限。"));
+        var state = Installation.Service();
+        if (state == Installation.ServiceState.Ready) {
+            content.Controls.Add(State(true, "已就绪", Installation.ServiceText(state)));
+            return;
+        }
         if (host.InstallRoot is not { } root || !File.Exists(Path.Combine(root, "install", "request_install.ps1"))) {
             content.Controls.Add(State(false, "无法在这里安装服务", "当前副本不含服务安装文件。请使用安装程序安装，或运行程序目录中的“安装或更新后台服务.cmd”。"));
             return;
         }
-        var state = Installation.Service(root);
-        bool current = state == Installation.ServiceState.Current;
-        content.Controls.Add(State(current, current ? "已就绪" : state == Installation.ServiceState.Outdated ? "需要更新" : "尚未安装", Installation.ServiceText(state)));
-        if (current) return;
-        var install = HomeTheme.Action(state == Installation.ServiceState.Outdated ? "更新后台服务" : "安装后台服务", AntdUI.TTypeMini.Primary, "SafetyCertificateOutlined");
+        bool repair = state == Installation.ServiceState.NeedsAttention;
+        content.Controls.Add(State(false, repair ? "需要检查" : "尚未安装", Installation.ServiceText(state)));
+        var install = HomeTheme.Action(repair ? "修复后台服务" : "安装后台服务", AntdUI.TTypeMini.Primary, "SafetyCertificateOutlined");
         install.Margin = new(0, 0, 0, 8);
         install.Click += async (_, _) => {
+            if (Installation.Service() == Installation.ServiceState.Ready) { Show(index); return; }
             serviceBusy = true; install.Loading = true; next.Enabled = back.Enabled = false;
             string? error = await Task.Run(() => Installation.RequestService(root, uninstall: false));
             serviceBusy = false; next.Enabled = back.Enabled = true;

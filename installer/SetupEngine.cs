@@ -50,10 +50,13 @@ static class SetupEngine
         Installation.CreateShortcut(Installation.StartMenuShortcut, Installation.Launcher(root));
         if (options.DesktopShortcut) Installation.CreateShortcut(Installation.DesktopShortcut, Installation.Launcher(root));
         if (Installation.SkipService) { progress.Report((1, "已跳过后台网络服务。")); return null; }
-        var state = Installation.Service(root);
-        if (state == Installation.ServiceState.Current) { progress.Report((1, "后台网络服务已安装且为当前版本，已跳过。")); return null; }
-        progress.Report((0.88, state == Installation.ServiceState.Outdated
-            ? "正在更新后台网络服务，请在 Windows 管理员确认窗口中选择“是”…" : "正在安装后台网络服务，请在 Windows 管理员确认窗口中选择“是”…"));
+        var state = Installation.Service();
+        if (state != Installation.ServiceState.NotInstalled) {
+            string message = Installation.ServiceText(state);
+            progress.Report((1, message));
+            return state == Installation.ServiceState.Ready ? null : message;
+        }
+        progress.Report((0.88, "正在安装后台网络服务，请在 Windows 管理员确认窗口中选择“是”…"));
         string? error = Installation.RequestService(root, uninstall: false);
         progress.Report((1, error == null ? "后台网络服务已就绪。" : "后台网络服务未安装：" + error));
         return error;

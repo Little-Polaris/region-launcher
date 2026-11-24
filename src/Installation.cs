@@ -159,33 +159,56 @@ static class Installation
 
     // ---- Background network service ----
 
-    public enum ServiceState { NotInstalled, Outdated, Current }
+    public enum ServiceState { NotInstalled, NeedsAttention, Ready }
 
-    /// <summary>Compares the installed service files with the service package shipped in this installation.</summary>
-    public static ServiceState Service(string root)
+    public static bool ServiceRegistered()
     {
-        using (var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + ServiceName))
-            if (key == null) return ServiceState.NotInstalled;
+        using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + ServiceName);
+        return key != null;
+    }
+
+    public static ServiceState Service()
+    {
         try {
-            var shipped = FileHashes(Path.Combine(root, "install", "package", "manifest.json"));
-            var installed = FileHashes(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), ServiceName, MarkerFile));
-            return shipped.Count != 0 && shipped.Count == installed.Count &&
-                shipped.All(file => installed.TryGetValue(file.Key, out var hash) && string.Equals(hash, file.Value, StringComparison.OrdinalIgnoreCase))
-                ? ServiceState.Current : ServiceState.Outdated;
-        } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException) {
-            return ServiceState.Outdated;
+            using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + ServiceName);
+            if (key == null) return ServiceState.NotInstalled;
+            string expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), ServiceName, "RegionNetworkService.exe");
+            if (key.GetValue("ImagePath") is not string image ||
+                !string.Equals(image.Trim('"'), expected, StringComparison.OrdinalIgnoreCase))
+                return ServiceState.NeedsAttention;
+            return ProbeService() ? ServiceState.Ready : ServiceState.NeedsAttention;
+        } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) {
+            return ServiceState.NeedsAttention;
         }
     }
 
-    static Dictionary<string, string> FileHashes(string path)
+    static bool ProbeService()
     {
-        using var json = JsonDocument.Parse(File.ReadAllText(path));
-        return json.RootElement.GetProperty("files").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? "", StringComparer.OrdinalIgnoreCase);
+        // Send a v1 request with a zero port. Its deliberate rejection proves the protocol
+        // is reachable without creating a worker, even when an environment is already running.
+        using var pipe = new NamedPipeClientStream(".", "RegionLauncher.Network.v1", PipeDirection.InOut, PipeOptions.Asynchronous);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try {
+            return ProbeServiceAsync(pipe, timeout.Token).GetAwaiter().GetResult();
+        } catch (Exception ex) when (ex is IOException or OperationCanceledException or UnauthorizedAccessException or TimeoutException) {
+            return false;
+        }
+    }
+
+    internal static async Task<bool> ProbeServiceAsync(NamedPipeClientStream pipe, CancellationToken token)
+    {
+        await pipe.ConnectAsync(token).ConfigureAwait(false);
+        byte[] request = new byte[40]; request[0] = 1;
+        await pipe.WriteAsync(request, token).ConfigureAwait(false);
+        byte[] reply = new byte[16];
+        await pipe.ReadExactlyAsync(reply, token).ConfigureAwait(false);
+        await pipe.WriteAsync(new byte[] { 1 }, token).ConfigureAwait(false);
+        return BitConverter.ToUInt32(reply, 0) == 87 && BitConverter.ToUInt32(reply, 4) == 1 && BitConverter.ToUInt64(reply, 8) == 0;
     }
 
     public static string ServiceText(ServiceState state) => state switch {
-        ServiceState.Current => "后台网络服务已安装，且为当前版本。",
-        ServiceState.Outdated => "后台网络服务已安装，但与当前版本不一致，需要更新。",
+        ServiceState.Ready => "现有后台网络服务可用，将直接复用。",
+        ServiceState.NeedsAttention => "后台网络服务已注册，但暂无法确认可用。请先检查服务是否正在运行，必要时手动修复。",
         _ => "后台网络服务尚未安装。",
     };
 
