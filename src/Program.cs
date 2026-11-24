@@ -218,7 +218,7 @@ sealed class Launcher : Form
 
     internal static string? DroppedExecutable(DragEventArgs e) =>
         e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files &&
-        Path.IsPathFullyQualified(files[0]) && files[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? files[0] : null;
+        Path.IsPathFullyQualified(files[0]) && ApplicationLibrary.SupportsTarget(files[0]) ? files[0] : null;
 
     void ShowRunLog()
     {
@@ -572,14 +572,14 @@ sealed class Launcher : Form
         try
         {
             ApplicationLibrary.ValidateEntry(selected);
-            string app = ApplicationLibrary.ResolvePath(selected.Application); if (!File.Exists(app)) throw new FileNotFoundException("程序不存在，请右键应用图标，编辑程序路径。");
+            string target = ApplicationLibrary.ResolvePath(selected.Application);
+            var (app, appArgs, workingDirectory) = ApplicationLibrary.PrepareTarget(target, selected.Arguments);
             if (applicationList is { } list && list.SelectedId != selected.Id) {
                 var updated = list with { SelectedId = selected.Id };
                 try { library.Save(updated); applicationList = updated; }
                 catch (Exception ex) { Append("无法保存上次启动的软件：" + ex.Message); }
             }
-            string appArgs = selected.Arguments;
-            Append($"请求启动软件：{selected.Name}；程序={app}；模式={(join ? "加入当前环境" : "新建环境")}。");
+            Append($"请求启动软件：{selected.Name}；程序={target}；模式={(join ? "加入当前环境" : "新建环境")}。");
             foreach (string s in new[] { app, appArgs }) if (s.Contains('\n') || s.Contains('\r') || s.Contains('\0')) throw new ArgumentException("配置不能包含换行符或空字符。");
             if (!dedicatedProxy.Configured) throw new IOException("请先配置独立代理和专用 DNS，程序尚未启动。");
             string dnsAddress = dedicatedProxy.DnsAddress;
@@ -594,7 +594,7 @@ sealed class Launcher : Form
             File.WriteAllText(Path.Combine(data, "profile.json"), JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true }));
             string id = Guid.NewGuid().ToString("N"); if (!join) currentJob = @"Local\RegionLauncher." + id;
             string folder = Path.Combine(data, "sessions", id); Directory.CreateDirectory(folder); string config = Path.Combine(folder, "session.ini");
-            string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(profile.AutoDst ? 1 : 0)}\r\n";
+            string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nWorkingDirectory={workingDirectory}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(profile.AutoDst ? 1 : 0)}\r\n";
             File.WriteAllText(config, ini, Encoding.Unicode);
             File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
             var browserPlan = LinkBrowser.Prepare(data, currentJob!, settings, applicationList!);

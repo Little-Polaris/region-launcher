@@ -56,6 +56,57 @@ sealed class ApplicationLibrary(string path)
     }
     static string NormalizePath(string application) => System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(application), AppContext.BaseDirectory);
     public static string ResolvePath(string application) => PackageExecutable.Resolve(NormalizePath(application));
+    internal const string TargetFilter = "程序与脚本 (*.exe;*.cmd;*.bat;*.ps1;*.vbs;*.sh)|*.exe;*.cmd;*.bat;*.ps1;*.vbs;*.sh";
+
+    public static bool SupportsTarget(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".exe" or ".cmd" or ".bat" or ".ps1" or ".vbs" or ".sh";
+
+    public static (string Executable, string Arguments, string WorkingDirectory) PrepareTarget(string path, string arguments)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("程序或脚本不存在，请重新选择路径。");
+        if (path.IndexOfAny(['"', '\r', '\n', '\0']) >= 0 || arguments.IndexOfAny(['\r', '\n', '\0']) >= 0)
+            throw new InvalidDataException("启动配置包含无法传递的字符。");
+        string folder = Path.GetDirectoryName(path)!;
+        string system = Environment.SystemDirectory;
+        string tail = arguments.Length == 0 ? "" : " " + arguments;
+        var (host, command) = Path.GetExtension(path).ToLowerInvariant() switch {
+            ".exe" => (path, arguments),
+            // cmd expands percent variables even inside quotes.
+            ".cmd" or ".bat" when path.Contains('%') => throw new IOException("批处理脚本的完整路径不能包含 %。"),
+            ".cmd" or ".bat" when path.StartsWith(@"\\", StringComparison.Ordinal) => throw new IOException("批处理脚本请使用本地路径或映射盘符。"),
+            ".cmd" or ".bat" => (Path.Combine(system, "cmd.exe"), $"/d /v:off /s /c \"\"{path}\"{tail}\""),
+            ".ps1" => (Path.Combine(system, @"WindowsPowerShell\v1.0\powershell.exe"), $"-NoLogo -NoProfile -NonInteractive -File \"{path}\"{tail}"),
+            ".vbs" => (Path.Combine(system, "cscript.exe"), $"//NoLogo //B \"{path}\"{tail}"),
+            ".sh" => (FindGitBash(), $"--noprofile --norc -- \"{path.Replace('\\', '/')}\"{tail}"),
+            _ => throw new InvalidDataException("请选择支持的程序或脚本。")
+        };
+        if (!File.Exists(host)) throw new FileNotFoundException("找不到该脚本所需的解释器。");
+        return (host, command, folder);
+    }
+
+    static string FindGitBash()
+    {
+        foreach (string hive in new[] { "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE" })
+        {
+            if (Microsoft.Win32.Registry.GetValue(hive + @"\SOFTWARE\GitForWindows", "InstallPath", null) is string install &&
+                Path.IsPathFullyQualified(install))
+            {
+                string bash = Path.Combine(install, "bin", "bash.exe");
+                if (File.Exists(bash)) return bash;
+            }
+        }
+        var roots = new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs") };
+        foreach (string root in roots)
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            string bash = Path.Combine(root, "Git", "bin", "bash.exe");
+            if (File.Exists(bash)) return bash;
+        }
+        throw new FileNotFoundException("运行 .sh 需要安装 Git for Windows（Git Bash）。");
+    }
+
     public static void ValidateEntry(LaunchApplication entry)
     {
         entry.Environment?.Validate();
@@ -63,8 +114,8 @@ sealed class ApplicationLibrary(string path)
             throw new InvalidDataException("软件需要名称、程序路径和有效的启动参数字段。");
         foreach (string text in new[] { entry.Id, entry.Name, entry.Application, entry.Arguments })
             if (text.IndexOfAny(['\r', '\n', '\0']) >= 0) throw new InvalidDataException("软件配置不能包含换行符或空字符。");
-        if (!System.IO.Path.GetExtension(NormalizePath(entry.Application)).Equals(".exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("请选择 Windows .exe 程序。");
+        if (!SupportsTarget(NormalizePath(entry.Application)))
+            throw new InvalidDataException("请选择 .exe、.cmd、.bat、.ps1、.vbs 或 .sh 文件。");
     }
     static void Validate(ApplicationList value)
     {

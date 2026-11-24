@@ -1,7 +1,7 @@
 sealed class ApplicationEditor : Form
 {
     readonly AntdUI.Input name = HomeTheme.Input("例如：Chrome 美区");
-    readonly AntdUI.Input executable = HomeTheme.Input("选择或粘贴 .exe 路径");
+    readonly AntdUI.Input executable = HomeTheme.Input("选择或粘贴程序或脚本路径");
     readonly AntdUI.Input arguments = HomeTheme.Input("可留空");
     readonly SearchComboBox country = new() { Dock = DockStyle.Fill };
     readonly SearchComboBox language = new() { Dock = DockStyle.Fill };
@@ -28,7 +28,7 @@ sealed class ApplicationEditor : Form
         grid.Controls.Add(HomeTheme.Caption("程序路径"), 0, 1); grid.Controls.Add(executable, 1, 1);
         var browse = HomeTheme.Action("浏览…", AntdUI.TTypeMini.Default, "FolderOpenOutlined"); browse.Anchor = AnchorStyles.Left;
         browse.Click += (_, _) => {
-            using var dialog = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", CheckFileExists = true };
+            using var dialog = new OpenFileDialog { Filter = ApplicationLibrary.TargetFilter, CheckFileExists = true };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             executable.Text = dialog.FileName;
             if (string.IsNullOrWhiteSpace(name.Text)) name.Text = Path.GetFileNameWithoutExtension(dialog.FileName);

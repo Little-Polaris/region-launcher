@@ -7,6 +7,8 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="AntdUI" Version="2.4.20" />
+    <Compile Include="../../src/Theme.cs" Link="Theme.cs" />
     <Compile Include="../../src/ApplicationLibrary.cs" Link="ApplicationLibrary.cs" />
     <Compile Include="../../src/PackageExecutable.cs" Link="PackageExecutable.cs" />
   </ItemGroup>

@@ -29,7 +29,7 @@ foreach (var invalid in new[] {
     new ApplicationList { Applications = [second, second] },
     new ApplicationList { Applications = [second with { Arguments = "\r\nApplication=bad.exe" }] },
     new ApplicationList { SelectedId = "missing", Applications = [second] },
-    new ApplicationList { Applications = [second with { Application = "bad.cmd" }] }
+    new ApplicationList { Applications = [second with { Application = "bad.txt" }] }
 }) {
     try { store.Save(invalid); throw new Exception("Invalid configuration accepted"); }
     catch (InvalidDataException) { }
@@ -74,5 +74,48 @@ foreach (var bad in new[] { japan with { GeoId = -1 }, japan with { Locale = "ba
 }
 File.Delete(path);
 Console.WriteLine("PASS: independent per-app environments, old-list migration, one-time defaults and invalid region preservation");
+if (args.Length == 2) {
+    string fixtures = Path.Combine(folder, "脚本 & 测试");
+    Directory.CreateDirectory(fixtures);
+    foreach (string ext in new[] { ".cmd", ".bat", ".ps1", ".vbs", ".sh" }) {
+        string script = Path.Combine(fixtures, "sample script" + ext);
+        string body = ext switch {
+            ".cmd" or ".bat" => "@echo off\r\n> result.txt echo %~1\r\n",
+            ".ps1" => "Set-Content -LiteralPath result.txt -Value $args[0]\r\n",
+            ".vbs" => "Set f = CreateObject(\"Scripting.FileSystemObject\").CreateTextFile(\"result.txt\", True)\r\nf.WriteLine WScript.Arguments(0)\r\nf.Close\r\n",
+            _ => "printf '%s\\n' \"$1\" > result.txt\n"
+        };
+        File.WriteAllText(script, body);
+        var entry = second with { Application = script, Arguments = "\"two words\"" };
+        store.Save(new ApplicationList { Applications = [entry] });
+        if (store.Load("", "").Applications.Single() != entry) throw new Exception("Script entry was changed");
+        (string host, string command, string cwd) target;
+        try { target = ApplicationLibrary.PrepareTarget(script, entry.Arguments); }
+        catch (FileNotFoundException) when (ext == ".sh") {
+            Console.WriteLine("SKIP: Git Bash unavailable.");
+            continue;
+        }
+        if (target.cwd != fixtures) throw new Exception("Script working directory was not set");
+        string result = Path.Combine(fixtures, "result.txt");
+        File.Delete(result);
+        string config = Path.Combine(fixtures, "run.ini");
+        File.WriteAllText(config, $"[session]\r\nJob=Local\\RegionLauncher.{Guid.NewGuid():N}\r\nApplication={target.host}\r\nArguments={target.command}\r\nWorkingDirectory={target.cwd}\r\nLocale=en-US\r\nRegion=US\r\nGeo=244\r\nTimeZone=Pacific Standard Time\r\n", System.Text.Encoding.Unicode);
+        var start = new System.Diagnostics.ProcessStartInfo(Path.GetFullPath(args[1])) {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        start.ArgumentList.Add("--locale-test"); start.ArgumentList.Add(config);
+        using var session = System.Diagnostics.Process.Start(start)!;
+        var error = session.StandardError.ReadToEndAsync();
+        var output = session.StandardOutput.ReadToEndAsync();
+        if (!session.WaitForExit(15000)) { session.Kill(true); throw new Exception("Script launch timed out"); }
+        if (!output.Result.Contains("STARTED PID=")) throw new Exception($"Cannot start {ext} interpreter: {error.Result}");
+        if (ext == ".ps1" && !File.Exists(result) && error.Result.Contains("PSSecurityException", StringComparison.Ordinal)) {
+            Console.WriteLine("PASS: PowerShell policy can still block script execution."); continue;
+        }
+        if (session.ExitCode != 0 || !File.Exists(result) || File.ReadAllText(result).Trim() != "two words")
+            throw new Exception($"{ext} did not run with expected directory and arguments: {error.Result}");
+        Console.WriteLine($"PASS: {ext} runs through the session helper with a Unicode path, quoted argument and script working directory.");
+    }
+}
 LinkBrowserTests.Run();
 Console.WriteLine("PASS: legacy migration, Unicode/quoted arguments, two entries for one executable, edit/delete/reopen/selection, invalid save preservation, malformed file preservation, relative/environment paths");
