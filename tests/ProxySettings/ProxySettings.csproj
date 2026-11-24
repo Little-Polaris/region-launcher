@@ -14,6 +14,7 @@
     <Compile Include="../../src/ProxyConfiguration.cs" Link="ProxyConfiguration.cs" />
     <Compile Include="../../src/ProxySettingsDialog.cs" Link="ProxySettingsDialog.cs" />
     <Compile Include="../../src/DedicatedProxy.cs" Link="DedicatedProxy.cs" />
+    <Compile Include="../../src/EngineLifetime.cs" Link="EngineLifetime.cs" />
     <Compile Include="../../src/ProxyRuntimeExit.cs" Link="ProxyRuntimeExit.cs" />
     <Compile Include="../../src/ProxyPorts.cs" Link="ProxyPorts.cs" />
     <Compile Include="../../src/ListenerRecovery.cs" Link="ListenerRecovery.cs" />

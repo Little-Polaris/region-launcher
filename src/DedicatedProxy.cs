@@ -121,6 +121,7 @@ sealed class DedicatedProxy : IDisposable
             starting = true;
             var dnsIp = IPAddress.Parse(DnsAddress);
             var requestedPorts = new ProxyPorts(Port, dnsIp);
+            if (ReclaimOrphanedEngines()) requestedPorts.WaitForRelease(log);
             requestedPorts.RequireAvailable(log);
             var runtime = JsonNode.Parse(File.ReadAllText(config))!.AsObject();
             ProxyConfiguration.PrepareRuntime(runtime);
@@ -137,6 +138,8 @@ sealed class DedicatedProxy : IDisposable
             var candidate = new Process { StartInfo = psi, EnableRaisingEvents = true };
             candidate.Exited += (_, _) => { if (!stopping && ReferenceEquals(process, candidate)) UnexpectedExit?.Invoke(); };
             try { candidate.Start(); } catch { candidate.Dispose(); throw; }
+            // If the launcher ends without its normal exit, Windows ends the engine too instead of leaving the ports bound.
+            EngineLifetime.Bind(candidate, log);
             process = candidate;
             // Retain the process handle returned by Start, never reacquire ownership via a port-table PID.
             _ = candidate.SafeHandle;
@@ -193,6 +196,28 @@ sealed class DedicatedProxy : IDisposable
         try { if (StopCore()) { fingerprint = null; selectedNode = null; } }
         finally { gate.Release(); }
     }
+    /// <summary>
+    /// Ends engines started from this installation's engine file by a launcher that no longer runs (it ended without
+    /// its normal exit). Returns true when one was ended.
+    /// </summary>
+    bool ReclaimOrphanedEngines()
+    {
+        bool ended = false;
+        foreach (var orphan in EngineLifetime.Orphans(EnginePath, process?.Id)) {
+            using (orphan) {
+                try {
+                    log($"[代理回收] 发现上次未正常退出留下的代理内核 PID={orphan.Id}，创建={orphan.StartTime:O}；其启动器已不存在，正在结束以释放端口。");
+                    orphan.Kill();
+                    ended |= orphan.WaitForExit(10000);
+                    log(orphan.HasExited ? $"[代理回收] PID={orphan.Id} 已结束。" : $"[代理回收] PID={orphan.Id} 结束等待超时。");
+                } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) {
+                    log($"[代理回收] PID={orphan.Id} 无法结束：{ex.Message}");
+                }
+            }
+        }
+        return ended;
+    }
+
     public async Task<bool> StopAsync()
     {
         await gate.WaitAsync().ConfigureAwait(false);
