@@ -101,6 +101,8 @@ sealed class Launcher : Form
         header.Controls.Add(homeStatus, 0, 1); header.SetColumnSpan(homeStatus, 2);
         void FitHeader()
         {
+            // A minimized window reports a zero-width client; keep the last layout instead of wrapping.
+            if (WindowState == FormWindowState.Minimized || header.ClientSize.Width == 0) return;
             bool narrow = header.ClientSize.Width - header.Padding.Horizontal < title.PreferredWidth + quick.PreferredSize.Width + LogicalToDeviceUnits(12);
             if ((header.GetRow(quick) == 2) == narrow) return;
             header.SuspendLayout();
@@ -111,6 +113,8 @@ sealed class Launcher : Form
         }
         header.SizeChanged += (_, _) => FitHeader();
         quick.SizeChanged += (_, _) => FitHeader();
+        // Re-flow after restoring from minimized; the tiles otherwise keep the scroll range of the zero-size layout.
+        Resize += (_, _) => { if (WindowState != FormWindowState.Minimized) { FitHeader(); tiles.PerformLayout(); } };
         title.FontChanged += (_, _) => FitHeader();
         footer.AccessibleName = "查看运行日志"; footer.Dock = DockStyle.Left; footer.Margin = Padding.Empty;
         footer.Click += (_, _) => ShowRunLog();
