@@ -11,14 +11,15 @@ sealed class SetupForm : Form
     readonly AntdUI.Button cancel = HomeTheme.Action("取消");
 
     // License page
-    readonly TextBox license = new() { Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = HomeTheme.Surface };
+    // Read-only text is not a Tab stop: when it receives focus on its own, Windows selects all of it.
+    readonly TextBox license = new() { Multiline = true, ReadOnly = true, TabStop = false, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = HomeTheme.Surface };
     readonly AntdUI.Checkbox accept = new() { Text = "我已阅读并同意《Region Launcher 用户协议》", AutoSizeMode = AntdUI.TAutoSize.Auto, Dock = DockStyle.Bottom };
     // Location page
     readonly AntdUI.Input location = HomeTheme.Input("安装位置");
     readonly AntdUI.Checkbox desktop = new() { Text = "创建桌面快捷方式", Checked = true, AutoSizeMode = AntdUI.TAutoSize.Auto };
     // Progress page
     readonly AntdUI.Progress bar = new() { Height = 26, Radius = 6, Anchor = AnchorStyles.Left | AnchorStyles.Right };
-    readonly TextBox log = new() { Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = HomeTheme.Surface };
+    readonly TextBox log = new() { Multiline = true, ReadOnly = true, TabStop = false, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, BackColor = HomeTheme.Surface };
     // Finish page
     readonly AntdUI.Checkbox launch = new() { Text = "立即启动 Region Launcher", Checked = true, AutoSizeMode = AntdUI.TAutoSize.Auto };
 
@@ -72,6 +73,7 @@ sealed class SetupForm : Form
                 var frame = new LogFrame(0, 8) { Dock = DockStyle.Fill };
                 frame.Controls.Add(license);
                 page.Controls.Add(frame); page.Controls.Add(accept);
+                license.Select(0, 0);
                 next.Text = "下一步"; next.Enabled = accept.Checked;
                 break;
             case 1:
