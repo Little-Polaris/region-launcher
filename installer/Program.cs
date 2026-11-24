@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
 static class Program
 {
     /// <summary>
@@ -12,6 +15,13 @@ static class Program
         HomeTheme.Initialize();
         string? Arg(string name) { int i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase)); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
         bool Flag(string name) => args.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        if (InsideLauncherJob()) {
+            const string message = "当前安装程序运行在 Region Launcher 环境内。退出启动器会同时关闭安装程序。请在 Windows 文件资源管理器中找到下载的安装文件，并从那里重新打开。";
+            if (Flag("/silent")) Console.Error.WriteLine(message);
+            else MessageDialog.Show(null, message, "Region Launcher 安装", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 4;
+        }
 
         if (Flag("/silent")) {
             string root = Arg("/dir") ?? Installation.DefaultDirectory;
@@ -35,4 +45,28 @@ static class Program
         Application.Run(new SetupForm());
         return 0;
     }
+
+    static bool InsideLauncherJob()
+    {
+        const uint JobObjectQuery = 4;
+        const string prefix = @"Local\RegionLauncher.";
+        string? jobName = Environment.GetEnvironmentVariable("REGION_LAUNCHER_JOB");
+        if (jobName == null || !jobName.StartsWith(prefix, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(jobName.AsSpan(prefix.Length), "N", out _)) return false;
+        nint current = GetCurrentProcess();
+        if (!IsProcessInJob(current, 0, out bool inAnyJob) || !inAnyJob) return false;
+        using var job = OpenJobObjectW(JobObjectQuery, false, jobName);
+        // A restricted child can inherit the launcher job without permission to open it by name.
+        if (job.IsInvalid) return Marshal.GetLastPInvokeError() == 5; // ERROR_ACCESS_DENIED
+        return IsProcessInJob(current, job.DangerousGetHandle(), out bool member) && member;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    static extern SafeFileHandle OpenJobObjectW(uint access, bool inherit, string name);
+
+    [DllImport("kernel32.dll")]
+    static extern nint GetCurrentProcess();
+
+    [DllImport("kernel32.dll")]
+    static extern bool IsProcessInJob(nint process, nint job, out bool member);
 }
