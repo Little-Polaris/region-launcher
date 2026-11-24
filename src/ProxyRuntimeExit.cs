@@ -79,6 +79,15 @@ sealed class ProxyRuntimeExit : IDisposable
     public Task SelectAsync(bool automatic, CancellationToken token) =>
         RequestAsync(HttpMethod.Put, "/proxies/RegionExit", token, automatic ? Automatic : Manual);
 
+    public async Task<int?> AutomaticMemberAsync(CancellationToken token)
+    {
+        using var json = await client.GetFromJsonAsync<System.Text.Json.JsonDocument>("/proxies/" + Automatic, token).ConfigureAwait(false);
+        if (json?.RootElement.TryGetProperty("now", out var value) != true || value.ValueKind != System.Text.Json.JsonValueKind.String) return null;
+        string member = value.GetString() ?? "";
+        const string prefix = "RegionMember";
+        return member.StartsWith(prefix, StringComparison.Ordinal) && int.TryParse(member.AsSpan(prefix.Length), out int index) && index > 0 ? index - 1 : null;
+    }
+
     async Task RequestAsync(HttpMethod method, string route, CancellationToken token, string? node = null)
     {
         using var request = new HttpRequestMessage(method, route);

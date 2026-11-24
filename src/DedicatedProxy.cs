@@ -59,12 +59,32 @@ sealed class DedicatedProxy : IDisposable
         finally { gate.Release(); }
     }
 
+    public async Task<JsonObject?> CurrentNodeAsync(CancellationToken token)
+    {
+        await gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (selectedNode != null) return (JsonObject)selectedNode.DeepClone();
+            var saved = ProxyConfiguration.ReadNode(File.ReadAllText(config), out _);
+            if (!ProxyConfiguration.IsFailover(saved)) return saved;
+            if (process is not { HasExited: false } || runtimeExit == null) return null;
+            try {
+                int? index = await runtimeExit.AutomaticMemberAsync(token).ConfigureAwait(false);
+                var members = saved["members"]!.AsArray();
+                return index is int i && i < members.Count ? (JsonObject)members[i]!.DeepClone() : null;
+            } catch (Exception ex) when (!token.IsCancellationRequested &&
+                ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException) { return null; }
+        }
+        finally { gate.Release(); }
+    }
+
     public async Task SwitchNodeAsync(JsonObject? node, CancellationToken token)
     {
         if (node != null && ProxyConfiguration.IsFailover(node))
             throw new IOException("请选择一个固定节点，或恢复已配置的自动组。");
         JsonObject? selection = node == null ? null :
             (JsonObject)ProxyConfiguration.Build(node, Port)["proxies"]![0]!.DeepClone();
+        if (selection != null && node!["name"] != null) selection["name"] = node["name"]!.DeepClone();
         await EnsureStarted(token).ConfigureAwait(false);
         await gate.WaitAsync(token).ConfigureAwait(false);
         try

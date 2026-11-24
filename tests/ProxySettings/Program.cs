@@ -13,6 +13,7 @@ static class Tests
         string path = Path.Combine(folder, "proxy.json");
         Task.Run(() => SubscriptionTests.Run(engine, folder)).GetAwaiter().GetResult();
         SubscriptionTests.Selection(folder);
+        Task.Run(() => SubscriptionTests.Latency(engine, folder)).GetAwaiter().GetResult();
         void Assert(bool value, string message) { if (!value) throw new Exception(message); }
         foreach (string type in ProxyConfiguration.Protocols)
         {

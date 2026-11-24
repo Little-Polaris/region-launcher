@@ -432,7 +432,10 @@ sealed class Launcher : Form
         if (!BeginPreparation(out long operation)) return;
         try
         {
-            using var picker = new ProxySwitchDialog(dedicatedProxy.ConfigPath);
+            var active = await dedicatedProxy.CurrentNodeAsync(shutdown.Token);
+            using var picker = new ProxySwitchDialog(dedicatedProxy.ConfigPath, active,
+                (nodes, progress, token) => NodeLatency.MeasureAsync(dedicatedProxy.EnginePath,
+                    Path.GetDirectoryName(dedicatedProxy.ConfigPath)!, nodes, progress, token));
             if (picker.ShowDialog(this) != DialogResult.OK) return;
             await dedicatedProxy.SwitchNodeAsync(picker.SelectedNode, shutdown.Token);
             Append("已切换本次运行的代理出口：" + picker.SelectedName + "。");

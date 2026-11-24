@@ -187,13 +187,40 @@ static class SubscriptionTests
             "Omitted probe settings were replaced by launcher defaults");
         string configPath = Path.Combine(folder, "switch-source.json");
         File.WriteAllText(configPath, ProxyConfiguration.Build(nodes.Nodes[0].Node, 17911).ToJsonString());
-        using var picker = new ProxySwitchDialog(configPath);
+        using var picker = new ProxySwitchDialog(configPath, nodes.Nodes[1].Node);
         var pickerSources = Field<AntdUI.Select>(picker, "sources");
         var pickerChoices = Field<ListBox>(picker, "choices");
         Assert(pickerSources.Items.Count == 3 && pickerChoices.Items.Count == 3, "Live switch did not load fixed nodes from chosen source");
+        Assert(picker.SelectedNode?["name"]?.GetValue<string>() == "JP second", "Picker did not select the active node");
+        Assert(!Field<AntdUI.Button>(picker, "apply").Enabled, "Already active node can be selected again");
         pickerSources.SelectedIndex = 1; pickerChoices.SelectedIndex = 1;
-        Assert(pickerChoices.Items.Count == 2 && picker.SelectedNode?["name"]?.GetValue<string>() == "US first", "Live switch mixed subscription sources");
+        Assert(pickerChoices.Items.Count == 3 && picker.SelectedNode?["name"]?.GetValue<string>() == "US first", "Live switch mixed subscription sources");
         Console.WriteLine("PASS: filter, choose correct node and restore cached multi-node selection");
+    }
+
+    sealed class ProbeResults : IProgress<(int Index, int? DelayMs)>
+    {
+        public readonly System.Collections.Concurrent.ConcurrentDictionary<int, int?> Delays = new();
+        public void Report((int Index, int? DelayMs) value) => Delays[value.Index] = value.DelayMs;
+    }
+
+    public static async Task Latency(string engine, string folder)
+    {
+        var handler = new Stub((request, _) => Task.FromResult(
+            request.RequestUri!.AbsolutePath.Contains("Probe0")
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"delay\":85}", Encoding.UTF8, "application/json") }
+                : new HttpResponseMessage(HttpStatusCode.GatewayTimeout)));
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var fixtures = new ProbeResults();
+        await NodeLatency.ProbeAsync(2, client, fixtures, CancellationToken.None);
+        Assert(fixtures.Delays.Count == 2 && fixtures.Delays[0] == 85 && fixtures.Delays[1] == null, "Bad delay or timeout result");
+        var real = new ProbeResults();
+        var unreachable = JsonNode.Parse("""{"type":"trojan","server":"192.0.2.1","port":443,"password":"fixture"}""")!.AsObject();
+        using var token = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        await NodeLatency.MeasureAsync(engine, folder, [unreachable], real, token.Token);
+        Assert(real.Delays.Count == 1 && real.Delays[0] == null &&
+            !Directory.EnumerateFiles(folder, "latency-*.json").Any(), "Mihomo probe failure or cleanup was not reported");
+        Console.WriteLine("PASS: node delay success, timeout and temporary Mihomo lifecycle");
     }
 
     sealed class Stub(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> response) : HttpMessageHandler
