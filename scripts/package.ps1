@@ -70,4 +70,5 @@ Compress-Archive -LiteralPath "$stage/app","$stage/docs","$stage/install","$stag
         [IO.Path]::GetFileName($resolvedStage) -notmatch '^package-[0-9a-f]{32}$') { throw 'Unexpected package staging directory' }
     Remove-Item -LiteralPath $resolvedStage -Recurse -Force
 }
+& (Join-Path $PSScriptRoot 'package_installer.ps1') -Zip "$packages/RegionLauncher-$version-win-x64.zip" -Version $version
 Write-Output "Packaged: $output"

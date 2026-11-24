@@ -36,9 +36,20 @@ Region Launcher 将程序路径、启动参数和地区设置保存为可复用�
 
 运行环境：**Windows 11 x64**、[.NET 10 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)。
 
-1. 从 [Releases](https://github.com/Little-Polaris/region-launcher/releases) 下载 `RegionLauncher-版本号-win-x64.zip`，完整解压到可写目录。
+**安装程序（推荐）**
+
+1. 从 [Releases](https://github.com/Little-Polaris/region-launcher/releases) 下载 `RegionLauncher-Setup-版本号-win-x64.exe` 并运行。
+2. 阅读并同意[用户协议](docs/EULA.md)，选择安装位置（默认 `%LOCALAPPDATA%\Programs\RegionLauncher`，无需管理员权限）。
+3. 安装程序会检查后台网络服务：已是当前版本则跳过，否则请求一次 Windows 管理员确认来安装或更新。
+4. 首次打开时，使用向导会引导你完成服务、代理节点和第一个程序的设置。
+
+安装位置记录在当前用户注册表中。启动器启动时会检查 GitHub 上的新版本（每天最多一次，可在“更多”菜单中关闭）；确认更新后，会下载安装程序并核对 SHA-256，退出启动器后原位覆盖，节点、订阅和程序列表保留。卸载请使用 Windows“设置 → 应用 → 已安装的应用”，可选择是否同时删除个人数据，并会卸载后台网络服务。
+
+**便携版**
+
+1. 下载 `RegionLauncher-版本号-win-x64.zip`，完整解压到可写目录。
 2. 首次使用时运行根目录的 **安装或更新后台服务.cmd**，完成 Windows 管理员确认。
-3. 打开 **app/RegionLauncher.exe**。
+3. 打开 **app/RegionLauncher.exe**。便携版不会写入注册表，发现新版本时会打开发布页供手动下载。
 
 后台服务负责网络接管。服务安装或更新需要管理员权限，日常打开启动器使用普通用户权限即可。安装包附带 WinDivert 驱动及相关许可证；依赖版本和来源见 [SOURCES](docs/SOURCES.md)。
 

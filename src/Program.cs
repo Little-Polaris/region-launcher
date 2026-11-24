@@ -18,6 +18,7 @@ static class Program
         }
         ApplicationConfiguration.Initialize();
         HomeTheme.Initialize();
+        if (Uninstaller.TryRun(args)) return;
         if (args.Length == 2 && args[0] == "--render-preview")
         {
             using var preview = new Launcher(); preview.StartPosition = FormStartPosition.Manual;
@@ -71,7 +72,14 @@ sealed class Launcher : Form
     readonly DiagnosticLog? diagnostics;
     Process? session;
     string? currentJob;
-    public Launcher() : this(Path.Combine(AppContext.BaseDirectory, "data")) { }
+    // Only the real startup shows the first-run wizard and checks for updates; tests construct the window with their own data folder.
+    public Launcher() : this(Path.Combine(AppContext.BaseDirectory, "data")) { interactiveStartup = true; }
+    readonly bool interactiveStartup;
+    UpdateSettings updateSettings = new();
+    readonly ToolStripMenuItem checkUpdate = new("检查更新…");
+    readonly ToolStripMenuItem autoUpdate = new("启动时自动检查更新") { CheckOnClick = true };
+    readonly ToolStripMenuItem wizard = new("使用向导…");
+    bool checkingUpdate;
     internal Launcher(string dataDirectory)
     {
         Icon = windowIcon; tray.Icon = trayIcon;
@@ -125,9 +133,11 @@ sealed class Launcher : Form
         Controls.Add(tiles); Controls.Add(running); Controls.Add(footerBar); Controls.Add(header);
         var openLogs = new ToolStripMenuItem("打开日志", null, (_, _) => OpenLogs());
         var showLog = new ToolStripMenuItem("查看运行日志", null, (_, _) => ShowRunLog());
-        actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, showLog, openLogs]);
+        actions.Items.AddRange([configureProxy, switchProxy, checkProxy, linkBrowser, new ToolStripSeparator(), probe, showLog, openLogs,
+            new ToolStripSeparator(), wizard, checkUpdate, autoUpdate]);
         foreach (var (item, icon) in new (ToolStripMenuItem, string)[] { (configureProxy, "CloudServerOutlined"), (switchProxy, "SwapOutlined"),
-            (checkProxy, "SafetyCertificateOutlined"), (linkBrowser, "GlobalOutlined"), (probe, "ExperimentOutlined"), (showLog, "FileTextOutlined"), (openLogs, "FolderOpenOutlined") })
+            (checkProxy, "SafetyCertificateOutlined"), (linkBrowser, "GlobalOutlined"), (probe, "ExperimentOutlined"), (showLog, "FileTextOutlined"), (openLogs, "FolderOpenOutlined"),
+            (wizard, "CompassOutlined"), (checkUpdate, "CloudDownloadOutlined") })
             item.Image = HomeTheme.Icon(icon, LogicalToDeviceUnits(16), HomeTheme.Muted);
         HomeTheme.Apply(actions); HomeTheme.Apply(trayMenu);
         tiles.DragEnter += (_, e) => e.Effect = tiles.Enabled && DroppedExecutable(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
@@ -158,6 +168,11 @@ sealed class Launcher : Form
             try { using var dialog = new LinkBrowserDialog(data, applicationList); if (dialog.ShowDialog(this) == DialogResult.OK) Append("授权链接浏览器已保存，下次启动程序生效。"); }
             catch (Exception ex) { Append("授权浏览器配置读取失败：" + ex.Message); }
         };
+        updateSettings = UpdateSettings.Load(data);
+        autoUpdate.Checked = updateSettings.AutoCheck;
+        autoUpdate.CheckedChanged += (_, _) => { updateSettings.AutoCheck = autoUpdate.Checked; updateSettings.Save(data); };
+        checkUpdate.Click += async (_, _) => await TrackOperation(() => CheckForUpdates(manual: true));
+        wizard.Click += (_, _) => ShowWizard();
         trayMenu.Items.Add("打开启动器", null, (_, _) => RestoreWindow());
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("退出（结束全部运行）", null, async (_, _) => await ExitAsync());
@@ -253,6 +268,87 @@ sealed class Launcher : Form
         if (disposing) { tray.Visible = false; tray.Dispose(); trayMenu.Dispose(); actions.Dispose(); windowIcon.Dispose(); trayIcon.Dispose(); shutdown.Dispose(); dedicatedProxy?.Dispose(); diagnostics?.Dispose(); }
         base.Dispose(disposing);
     }
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (!interactiveStartup) return;
+        BeginInvoke(async () => {
+            if (!SetupWizard.Completed(data)) {
+                // Existing users who already set everything up skip the guide.
+                if (dedicatedProxy.Configured && applicationList?.Applications.Count > 0) SetupWizard.MarkCompleted(data);
+                else ShowWizard();
+            }
+            if (updateSettings.AutoCheck && (updateSettings.LastCheck is not { } last || DateTime.Now - last > TimeSpan.FromHours(20))) {
+                await Task.Delay(TimeSpan.FromSeconds(3));
+                await TrackOperation(() => CheckForUpdates(manual: false));
+            }
+        });
+    }
+
+    void ShowWizard()
+    {
+        if (exiting) return;
+        var host = new WizardHost(
+            Installation.CurrentInstallation(AppContext.BaseDirectory) ?? PortableRoot(),
+            () => dedicatedProxy.Configured, () => configureProxy.PerformClick(),
+            () => applicationList?.Applications.Count ?? 0, () => EditSoftware(null),
+            () => updateSettings.AutoCheck, value => autoUpdate.Checked = value);
+        using var dialog = new SetupWizard(host);
+        dialog.ShowDialog(this);
+        SetupWizard.MarkCompleted(data);
+    }
+
+    // A portable copy unpacked from the ZIP still has the service installer next to the app folder.
+    static string? PortableRoot()
+    {
+        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
+        return File.Exists(Path.Combine(root, "install", "request_install.ps1")) ? root : null;
+    }
+
+    async Task CheckForUpdates(bool manual)
+    {
+        if (checkingUpdate || exiting) return;
+        checkingUpdate = true; checkUpdate.Enabled = false;
+        try {
+            UpdateInfo? update;
+            try { update = await Updater.CheckAsync(shutdown.Token); }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) {
+                Append("检查更新失败：" + ex.Message);
+                if (manual && !exiting) MessageDialog.Show(this, "无法连接 GitHub 检查更新：" + ex.Message + "\n\n可以稍后重试，或打开发布页查看。", "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            updateSettings.LastCheck = DateTime.Now; updateSettings.Save(data);
+            if (update == null) {
+                Append($"检查更新：当前 {Updater.Current} 已是最新版本。");
+                if (manual) MessageDialog.Show(this, $"当前版本 {Updater.Current} 已是最新版本。", "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Append($"发现新版本 {update.Version}。");
+            if (exiting) return;
+            if (!manual) RestoreWindow();
+            string notes = update.Notes.Length > 600 ? update.Notes[..600] + "…" : update.Notes;
+            string? root = Installation.CurrentInstallation(AppContext.BaseDirectory);
+            if (root == null) {
+                if (MessageDialog.Show(this, $"发现新版本 {update.Version}（当前 {Updater.Current}）。\n\n{notes}\n\n当前是便携版，无法自动更新。是否打开发布页下载？",
+                    "发现新版本", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes) Installation.OpenUrl(update.Page);
+                return;
+            }
+            if (MessageDialog.Show(this, $"发现新版本 {update.Version}（当前 {Updater.Current}）。\n\n{notes}\n\n现在更新吗？更新时启动器会退出并结束全部运行中的程序，节点、订阅和程序列表会保留。",
+                "发现新版本", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
+            using var download = new UpdateDownloadDialog(update);
+            var result = download.ShowDialog(this);
+            if (result == DialogResult.Abort) {
+                Append("下载更新失败：" + download.Error?.Message);
+                MessageDialog.Show(this, "下载更新失败：" + download.Error?.Message, "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (result != DialogResult.OK || download.Result == null) return;
+            Append($"已下载并校验 {update.SetupName}，退出后开始安装。");
+            Updater.StartInstaller(download.Result, root);
+            _ = ExitAsync();
+        } finally { checkingUpdate = false; checkUpdate.Enabled = true; }
+    }
+
     internal void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
     async Task TrackOperation(Func<Task> action) {
         if (exiting) return;

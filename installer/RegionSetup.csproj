@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Self-contained single-file installer: runs without the .NET runtime and carries the release ZIP as its payload. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>RegionLauncherSetup</AssemblyName>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>../src/app.manifest</ApplicationManifest>
+    <ApplicationIcon>../src/assets/RegionLauncher.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/Theme.cs" Link="Theme.cs" />
+    <Compile Include="../src/Installation.cs" Link="Installation.cs" />
+    <EmbeddedResource Include="../docs/EULA.md" LogicalName="EULA.md" />
+    <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" Condition="'$(PayloadZip)' != '' And Exists('$(PayloadZip)')" />
+    <EmbeddedResource Include="../src/assets/RegionLauncher.ico" LogicalName="RegionLauncher.AppIcon.ico" />
+    <PackageReference Include="AntdUI" Version="2.4.20" />
+  </ItemGroup>
+</Project>
