@@ -12,7 +12,7 @@ static class Uninstaller
         if (args.Length >= 2 && args[0] == "--uninstall-run") {
             bool silent = args.Contains("--silent");
             bool deleteData = args.Contains("--delete-data");
-            Environment.ExitCode = Run(args[1], silent, deleteData);
+            Environment.ExitCode = Run(args[1], silent, deleteData, args.Contains("--force"));
             return true;
         }
         return false;
@@ -36,7 +36,7 @@ static class Uninstaller
         Process.Start(psi)?.Dispose();
     }
 
-    static int Run(string root, bool silent, bool deleteData)
+    static int Run(string root, bool silent, bool deleteData, bool force = false)
     {
         root = Path.GetFullPath(root);
         try {
@@ -49,6 +49,7 @@ static class Uninstaller
                 if (dialog.ShowDialog() != DialogResult.OK) return 1;
                 return dialog.Succeeded ? 0 : 3;
             }
+            if (!Installation.CloseRunningSilently([root], force)) return 4;
             var log = new List<string>();
             return Remove(root, deleteData, log.Add) ? 0 : 3;
         } finally { ScheduleSelfCleanup(); }
@@ -126,7 +127,7 @@ sealed class UninstallDialog : Form
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(22, 16, 22, 8), ColumnCount = 1, RowCount = 4, BackColor = HomeTheme.Surface };
         body.RowStyles.Add(new(SizeType.AutoSize)); body.RowStyles.Add(new(SizeType.AutoSize)); body.RowStyles.Add(new(SizeType.AutoSize)); body.RowStyles.Add(new(SizeType.Percent, 100));
         body.Controls.Add(new Label { Text = "卸载 Region Launcher", AutoSize = true, Font = new(HomeTheme.FontName, 13, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = new(0, 0, 0, 8) });
-        body.Controls.Add(new Label { Text = $"将删除 {root} 中的程序文件、开始菜单和桌面快捷方式及注册表信息，并在你确认后卸载后台网络服务。卸载前请先退出启动器。",
+        body.Controls.Add(new Label { Text = $"将删除 {root} 中的程序文件、开始菜单和桌面快捷方式及注册表信息，并在你确认后卸载后台网络服务。启动器如在运行，会先请它退出。",
             AutoSize = true, MaximumSize = new(560, 0), ForeColor = HomeTheme.Muted, Margin = new(0, 0, 0, 10) });
         deleteData.Anchor = AnchorStyles.Left | AnchorStyles.Right; deleteData.Dock = DockStyle.None;
         body.Controls.Add(deleteData);
@@ -137,12 +138,7 @@ sealed class UninstallDialog : Form
         bool finished = false;
         close.Click += (_, _) => DialogResult = finished ? DialogResult.OK : DialogResult.Cancel;
         start.Click += async (_, _) => {
-            var running = Installation.RunningFrom(root);
-            if (running.Count != 0) {
-                foreach (var p in running) p.Dispose();
-                MessageDialog.Show(this, "Region Launcher 仍在运行。请先在托盘图标上右键选择“退出（结束全部运行）”，然后再卸载。", "卸载 Region Launcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
+            if (!await Installation.CloseRunning(this, [root], "卸载")) return;
             if (deleteData.Checked && MessageDialog.Show(this, "个人数据删除后无法恢复，确定继续？", "卸载 Region Launcher", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK) return;
             start.Enabled = deleteData.Enabled = close.Enabled = false; start.Loading = true;
             bool delete = deleteData.Checked;

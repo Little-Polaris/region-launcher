@@ -27,8 +27,8 @@ static class SetupEngine
         if (!Path.IsPathFullyQualified(root)) return "请填写完整的安装路径。";
         if (Path.GetPathRoot(full) is { } drive && Installation.SamePath(drive, full)) return "不能直接安装到磁盘根目录，请选择一个文件夹。";
         if (File.Exists(full)) return "安装位置是一个文件。";
-        if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any() && !Installation.IsOwnedDirectory(full))
-            return "所选文件夹不为空，且不是 Region Launcher 的安装位置。请选择空文件夹或新文件夹。";
+        if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any() && !Installation.IsOwnedDirectory(full) && !Installation.IsPortableDirectory(full))
+            return "所选文件夹不为空，且不是 Region Launcher 的安装位置或便携版目录。请选择空文件夹或新文件夹。";
         return null;
     }
 
@@ -98,14 +98,7 @@ static class SetupEngine
     {
         var deadline = Stopwatch.StartNew();
         try { using var process = Process.GetProcessById(pid); process.WaitForExit(timeout); } catch (ArgumentException) { }
-        while (deadline.Elapsed < timeout) {
-            var running = Installation.RunningFrom(root, Environment.ProcessId);
-            int count = running.Count;
-            foreach (var p in running) p.Dispose();
-            if (count == 0) return true;
-            Thread.Sleep(300);
-        }
-        return false;
+        return Installation.WaitUntilClosed([root], timeout - deadline.Elapsed > TimeSpan.Zero ? timeout - deadline.Elapsed : TimeSpan.Zero);
     }
 
     public static void Launch(string root)

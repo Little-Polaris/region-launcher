@@ -23,6 +23,9 @@ sealed class SetupForm : Form
     readonly AntdUI.Checkbox launch = new() { Text = "立即启动 Region Launcher", Checked = true, AutoSizeMode = AntdUI.TAutoSize.Auto };
 
     readonly string? existing = Installation.InstalledDirectory();
+    // A running portable copy (unpacked ZIP) is offered for in-place conversion.
+    readonly string? portable;
+    readonly Label mode = new() { AutoSize = true, ForeColor = HomeTheme.Accent, Margin = new(3, 2, 3, 6) };
     readonly string? updateRoot;
     readonly int updatePid;
     int index;
@@ -36,7 +39,9 @@ sealed class SetupForm : Form
         license.Text = SetupEngine.License();
         license.Font = new(HomeTheme.FontName, 9.5f);
         log.Font = new("Consolas", 9.5f);
-        location.Text = existing ?? Installation.DefaultDirectory;
+        portable = existing == null ? Installation.RunningLauncherRoots().FirstOrDefault(Installation.IsPortableDirectory) : null;
+        location.Text = existing ?? portable ?? Installation.DefaultDirectory;
+        location.TextChanged += (_, _) => UpdateMode();
         accept.CheckedChanged += (_, _) => next.Enabled = accept.Checked || index != 0;
 
         var header = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new(28, 18, 28, 14), ColumnCount = 1, BackColor = HomeTheme.Background };
@@ -71,9 +76,10 @@ sealed class SetupForm : Form
                 break;
             case 1:
                 title.Text = existing != null ? "升级 Region Launcher" : "安装位置";
-                subtitle.Text = existing != null ? $"检测到已安装的 {Installation.InstalledVersion() ?? "旧版本"}，将在原位置升级，节点、订阅和程序列表会保留。" : "Region Launcher 将安装到当前用户目录，无需管理员权限。";
+                subtitle.Text = existing != null ? $"检测到已安装的 {Installation.InstalledVersion() ?? "旧版本"}，将在原位置升级，节点、订阅和程序列表会保留。"
+                    : portable != null ? "检测到正在使用的便携版，默认原地转为安装版，也可以改装到其他位置。" : "Region Launcher 将安装到当前用户目录，无需管理员权限。";
                 page.Controls.Add(LocationPage());
-                next.Text = existing != null ? "升级" : "安装";
+                UpdateMode();
                 break;
             case 2:
                 title.Text = updateRoot != null ? "正在更新 Region Launcher" : "正在安装"; subtitle.Text = "请稍候，安装过程中可能会出现 Windows 管理员确认窗口。";
@@ -98,14 +104,16 @@ sealed class SetupForm : Form
         browse.Click += (_, _) => {
             using var dialog = new FolderBrowserDialog { Description = "选择安装位置", UseDescriptionForTitle = true, ShowNewFolderButton = true };
             if (dialog.ShowDialog(this) == DialogResult.OK)
-                location.Text = Directory.EnumerateFileSystemEntries(dialog.SelectedPath).Any() && !Installation.IsOwnedDirectory(dialog.SelectedPath)
-                    ? Path.Combine(dialog.SelectedPath, "RegionLauncher") : dialog.SelectedPath;
+                location.Text = Directory.EnumerateFileSystemEntries(dialog.SelectedPath).Any() && !Installation.IsOwnedDirectory(dialog.SelectedPath) &&
+                    !Installation.IsPortableDirectory(dialog.SelectedPath) ? Path.Combine(dialog.SelectedPath, "RegionLauncher") : dialog.SelectedPath;
         };
         location.ReadOnly = existing != null; browse.Enabled = existing == null;
         grid.Controls.Add(HomeTheme.Caption("安装到"), 0, 0); grid.SetColumnSpan(grid.GetControlFromPosition(0, 0)!, 2);
         grid.Controls.Add(location, 0, 1); grid.Controls.Add(browse, 1, 1);
-        grid.Controls.Add(desktop, 0, 2);
-        int row = 3;
+        grid.Controls.Add(mode, 0, 2); grid.SetColumnSpan(mode, 2);
+        mode.MaximumSize = new(LogicalToDeviceUnits(600), 0);
+        grid.Controls.Add(desktop, 0, 3);
+        int row = 4;
         if (!Installation.DesktopRuntimeInstalled()) {
             var runtime = new AntdUI.Alert { TextTitle = "需要 .NET 10 桌面运行时", Text = "这台电脑尚未安装 .NET 10 Desktop Runtime x64，安装后才能打开 Region Launcher。",
                 Icon = AntdUI.TType.Warn, Radius = 8, Dock = DockStyle.Fill, Height = LogicalToDeviceUnits(66), Margin = new(3, 12, 3, 4) };
@@ -118,6 +126,20 @@ sealed class SetupForm : Form
         note.MaximumSize = new(LogicalToDeviceUnits(600), 0); note.Margin = new(3, 14, 3, 0);
         grid.Controls.Add(note, 0, row); grid.SetColumnSpan(note, 2);
         return grid;
+    }
+
+    // Explains what happens at the chosen path: fresh install, in-place upgrade, or portable conversion.
+    void UpdateMode()
+    {
+        string path = location.Text.Trim();
+        bool owned = false, isPortable = false;
+        try { owned = Path.IsPathFullyQualified(path) && Installation.IsOwnedDirectory(path); isPortable = !owned && Path.IsPathFullyQualified(path) && Installation.IsPortableDirectory(path); }
+        catch (ArgumentException) { }
+        mode.Text = owned ? "这是已有的安装位置：将替换程序文件，保留 app\\data 中的节点、订阅和程序列表。"
+            : isPortable ? $"这是便携版 {Installation.CopyVersion(path) ?? ""} 的目录：将原地转为安装版，替换程序文件，保留 app\\data 中的节点、订阅、程序列表和浏览器资料。"
+            : "";
+        mode.Visible = mode.Text.Length != 0;
+        if (index == 1) next.Text = owned || isPortable ? "升级" : "安装";
     }
 
     Control ProgressPage()
@@ -152,11 +174,18 @@ sealed class SetupForm : Form
         return flow;
     }
 
-    void Next()
+    async void Next()
     {
         if (index == 0) { if (accept.Checked) Show(1); return; }
         if (index == 1) {
-            if (SetupEngine.CheckTarget(location.Text.Trim()) is { } error) { MessageDialog.Show(this, error, "安装位置", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            string root = location.Text.Trim();
+            if (SetupEngine.CheckTarget(root) is { } error) { MessageDialog.Show(this, error, "安装位置", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            // Any running launcher must exit first: files may be in use, and only one launcher can run at a time.
+            next.Enabled = back.Enabled = cancel.Enabled = false; next.Loading = true;
+            bool closed;
+            try { closed = await Installation.CloseRunning(this, [Path.GetFullPath(root)], "安装"); }
+            finally { next.Loading = false; next.Enabled = back.Enabled = cancel.Enabled = true; }
+            if (!closed) return;
             Show(2); _ = RunInstall(); return;
         }
         if (index == 3) {
@@ -175,12 +204,13 @@ sealed class SetupForm : Form
         });
         void Report(string text) => ((IProgress<(double, string)>)progress).Report((bar.Value, text));
         try {
-            bool upgrade = Installation.IsOwnedDirectory(root);
-            if (upgrade) {
-                Report(updateRoot != null ? "正在等待 Region Launcher 退出…" : "正在检查 Region Launcher 是否在运行…");
-                bool exited = await Task.Run(() => SetupEngine.WaitForExit(root, updatePid, TimeSpan.FromSeconds(updateRoot != null ? 90 : 2)));
-                if (!exited) throw new IOException("Region Launcher 仍在运行。请在托盘图标上右键选择“退出（结束全部运行）”后重试。");
-            }
+            bool upgrade = Installation.IsOwnedDirectory(root) || Installation.IsPortableDirectory(root);
+            if (updateRoot != null) {
+                Report("正在等待 Region Launcher 退出…");
+                bool exited = await Task.Run(() => SetupEngine.WaitForExit(root, updatePid, TimeSpan.FromSeconds(90)));
+                if (!exited && !await Installation.CloseRunning(this, [root], "更新")) throw new IOException("已取消：Region Launcher 仍在运行。");
+            } else if (!await Task.Run(() => Installation.WaitUntilClosed([root], TimeSpan.FromSeconds(10))))
+                throw new IOException("Region Launcher 仍在运行。请在托盘图标上右键选择“退出（结束全部运行）”后重试。");
             var options = new SetupEngine.Options(root, upgrade && updateRoot != null ? File.Exists(Installation.DesktopShortcut) : desktop.Checked, upgrade);
             serviceWarning = await Task.Run(() => SetupEngine.Install(options, progress, CancellationToken.None));
             installed = true;

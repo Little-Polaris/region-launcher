@@ -283,7 +283,7 @@ class ModernList : ListBox
 // A styled, real message window (keeps its title so callers and tests can find and close it).
 sealed class MessageDialog : Form
 {
-    MessageDialog(string text, string title, MessageBoxButtons buttons, MessageBoxIcon icon)
+    MessageDialog(string text, string title, (string Text, DialogResult Result)[] choices, MessageBoxIcon icon)
     {
         HomeTheme.Dialog(this, title, new(440, 10), new(360, 0));
         FormBorderStyle = FormBorderStyle.FixedDialog; MinimizeBox = MaximizeBox = false; AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -303,10 +303,6 @@ sealed class MessageDialog : Form
         var message = new System.Windows.Forms.Label { Text = text, AutoSize = true, MaximumSize = new(LogicalToDeviceUnits(420), 0),
             ForeColor = HomeTheme.Muted, Margin = Padding.Empty, UseMnemonic = false };
         body.Controls.Add(heading, 1, 0); body.Controls.Add(message, 1, 1);
-        var choices = buttons switch {
-            MessageBoxButtons.OKCancel => new[] { ("确定", DialogResult.OK), ("取消", DialogResult.Cancel) },
-            MessageBoxButtons.YesNo => new[] { ("是", DialogResult.Yes), ("否", DialogResult.No) },
-            _ => new[] { ("知道了", DialogResult.OK) } };
         var controls = choices.Select((c, i) => {
             var button = HomeTheme.Action(c.Item1, i == 0 ? (icon == MessageBoxIcon.Error ? TTypeMini.Error : TTypeMini.Primary) : TTypeMini.Default);
             button.DialogResult = c.Item2; return (Control)button; }).Reverse().ToArray();
@@ -321,7 +317,17 @@ sealed class MessageDialog : Form
     public static DialogResult Show(IWin32Window? owner, string text, string title,
         MessageBoxButtons buttons = MessageBoxButtons.OK, MessageBoxIcon icon = MessageBoxIcon.None)
     {
-        using var dialog = new MessageDialog(text, title, buttons, icon);
+        var choices = buttons switch {
+            MessageBoxButtons.OKCancel => new[] { ("确定", DialogResult.OK), ("取消", DialogResult.Cancel) },
+            MessageBoxButtons.YesNo => new[] { ("是", DialogResult.Yes), ("否", DialogResult.No) },
+            _ => new[] { ("知道了", DialogResult.OK) } };
+        return Ask(owner, text, title, icon, choices);
+    }
+
+    /// <summary>Like Show, with named buttons; the first is the primary (default) action and the last cancels.</summary>
+    public static DialogResult Ask(IWin32Window? owner, string text, string title, MessageBoxIcon icon, params (string Text, DialogResult Result)[] choices)
+    {
+        using var dialog = new MessageDialog(text, title, choices, icon);
         if (owner is not Form { Visible: true }) dialog.StartPosition = FormStartPosition.CenterScreen;
         return dialog.ShowDialog(owner);
     }

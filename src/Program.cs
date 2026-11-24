@@ -26,6 +26,7 @@ static class Program
             using var bitmap = new Bitmap(preview.Width, preview.Height);
             preview.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size)); bitmap.Save(args[1]); preview.Close(); return;
         }
+        SingleInstance.ExitRequested = form => ((Launcher)form).RequestExit();
         SingleInstance.Run(() => new Launcher(), form => ((Launcher)form).RestoreWindow());
     }
 }
@@ -347,6 +348,13 @@ sealed class Launcher : Form
             Updater.StartInstaller(download.Result, root);
             _ = ExitAsync();
         } finally { checkingUpdate = false; checkUpdate.Enabled = true; }
+    }
+
+    /// <summary>Exit requested from outside (installer, uninstaller): close open dialogs, then the normal tray exit.</summary>
+    internal void RequestExit()
+    {
+        foreach (var form in Application.OpenForms.Cast<Form>().Where(f => f != this && f.Modal).Reverse().ToList()) form.Close();
+        BeginInvoke(async () => await ExitAsync());
     }
 
     internal void RestoreWindow() { Show(); ShowInTaskbar = true; if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }

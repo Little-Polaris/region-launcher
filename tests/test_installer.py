@@ -1,7 +1,8 @@
 """Install, upgrade and uninstall with the real installer into a temporary folder.
 
 Registry writes go to a throwaway HKCU key and shortcuts to a temporary folder; the network service is skipped.
-Usage: python tests/test_installer.py packages/RegionLauncher-Setup-<version>-win-x64.exe
+Usage: python tests/test_installer.py packages/RegionLauncher-Setup-<version>-win-x64.exe [packages/RegionLauncher-<version>-win-x64.zip]
+The ZIP (default: next to the installer) is unpacked as a portable copy to test in-place conversion.
 """
 import argparse
 import os
@@ -9,12 +10,18 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+import time
 import winreg
+import zipfile
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument('setup', type=Path)
+parser.add_argument('zip', type=Path, nargs='?')
 args = parser.parse_args()
+if args.zip is None:
+    version = args.setup.name.removeprefix('RegionLauncher-Setup-').removesuffix('-win-x64.exe')
+    args.zip = args.setup.with_name(f'RegionLauncher-{version}-win-x64.zip')
 
 test_key = rf'Software\RegionLauncherInstallerTest\{uuid.uuid4().hex}'
 work = Path(tempfile.mkdtemp(prefix='rl-installer-'))
@@ -95,7 +102,39 @@ try:
     uninstall(second, delete_data=True)
     assert not second.exists(), 'installation folder left behind'
     assert read(product, 'InstallLocation') is None, 'registry left behind'
-    print('PASS: install, registry and shortcuts, upgrade keeps data, foreign folder refused, uninstall keeping or deleting data')
+
+    # A portable copy unpacked from the release ZIP converts in place and keeps its data.
+    portable = work / 'portable'
+    with zipfile.ZipFile(args.zip) as archive:
+        archive.extractall(portable)
+    assert not (portable / 'installation.json').exists()
+    (portable / 'app' / 'data').mkdir(exist_ok=True)
+    (portable / 'app' / 'data' / 'applications.json').write_text('{"portable": true}', encoding='utf-8')
+    (portable / 'evidence').mkdir(exist_ok=True)
+    (portable / 'evidence' / 'old.json').write_text('{}', encoding='utf-8')
+    # Something still running from the copy blocks the install until it is closed (a stand-in for the proxy engine).
+    engine = portable / 'app' / 'proxy' / 'mihomo.exe'
+    original_engine = engine.read_bytes()
+    shutil.copy2(Path(os.environ['SystemRoot']) / 'System32' / 'PING.EXE', engine)
+    holder = subprocess.Popen([str(engine), '-n', '300', '127.0.0.1'], stdout=subprocess.DEVNULL)
+    try:
+        blocked = subprocess.run([str(args.setup), '/silent', '/dir', str(portable)], env=env, capture_output=True, text=True, timeout=300)
+        assert blocked.returncode == 3 and holder.poll() is None, f'install did not stop for a running copy: {blocked.returncode}'
+        assert not (portable / 'installation.json').exists(), 'files changed while a copy was running'
+        install(portable, '/force')
+        time.sleep(1)
+        assert holder.poll() is not None, 'running copy was not closed'
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+    assert (portable / 'installation.json').is_file(), 'portable copy not converted'
+    assert engine.read_bytes() == original_engine, 'program files not replaced'
+    assert (portable / 'app' / 'data' / 'applications.json').read_text(encoding='utf-8') == '{"portable": true}', 'portable data changed'
+    assert Path(read(product, 'InstallLocation')) == portable, 'converted copy not registered'
+    uninstall(portable, delete_data=True)
+    assert not portable.exists(), 'converted copy left behind'
+    print('PASS: install, registry and shortcuts, upgrade keeps data, foreign folder refused, uninstall keeping or deleting data, '
+          'portable copy converted in place after closing what runs from it')
 finally:
     def drop(path):
         try:

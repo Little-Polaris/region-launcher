@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -59,6 +61,23 @@ static class Installation
             using var json = JsonDocument.Parse(File.ReadAllText(marker));
             return json.RootElement.TryGetProperty("product", out var product) && product.GetString() == "RegionLauncher";
         } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException) { return false; }
+    }
+
+    /// <summary>A copy unpacked from the release ZIP (not created by the installer) that can be converted in place.</summary>
+    public static bool IsPortableDirectory(string root)
+    {
+        try {
+            string full = Path.GetFullPath(root);
+            if (IsOwnedDirectory(full) || !File.Exists(Launcher(full)) || !File.Exists(Path.Combine(full, "app", "RegionLauncher.dll")) ||
+                !File.Exists(Path.Combine(full, "app", "RegionSession.exe"))) return false;
+            return FileVersionInfo.GetVersionInfo(Launcher(full)).ProductName == "RegionLauncher";
+        } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return false; }
+    }
+
+    public static string? CopyVersion(string root)
+    {
+        try { return FileVersionInfo.GetVersionInfo(Launcher(root)).ProductVersion?.Split('+')[0]; }
+        catch (Exception ex) when (ex is IOException or ArgumentException) { return null; }
     }
 
     public static void WriteMarker(string root, string version) =>
@@ -208,11 +227,11 @@ static class Installation
 
     // ---- Processes ----
 
-    /// <summary>Launcher or session processes started from this installation.</summary>
+    /// <summary>Launcher, session and proxy-engine processes started from this installation.</summary>
     public static List<Process> RunningFrom(string root, int? except = null)
     {
         var found = new List<Process>();
-        foreach (string name in new[] { "RegionLauncher", "RegionSession" })
+        foreach (string name in new[] { "RegionLauncher", "RegionSession", "mihomo" })
             foreach (var process in Process.GetProcessesByName(name)) {
                 bool match = false;
                 try { match = process.Id != except && process.MainModule?.FileName is { } path && path.StartsWith(Path.GetFullPath(root).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase); }
@@ -220,6 +239,131 @@ static class Installation
                 if (match) found.Add(process); else process.Dispose();
             }
         return found;
+    }
+
+    /// <summary>Installation roots of launchers running in this Windows session (installed or portable).</summary>
+    public static List<string> RunningLauncherRoots()
+    {
+        var roots = new List<string>();
+        int session = Process.GetCurrentProcess().SessionId;
+        foreach (var process in Process.GetProcessesByName("RegionLauncher")) {
+            try {
+                if (process.SessionId == session && process.Id != Environment.ProcessId && process.MainModule?.FileName is { } path &&
+                    Path.GetFileName(Path.GetDirectoryName(path)) is { } folder && folder.Equals("app", StringComparison.OrdinalIgnoreCase)) {
+                    string root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, ".."));
+                    if (!roots.Any(r => SamePath(r, root))) roots.Add(root);
+                }
+            } catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+            finally { process.Dispose(); }
+        }
+        return roots;
+    }
+
+    static bool AnyRunning(IEnumerable<string> roots)
+    {
+        foreach (string root in roots) {
+            var running = RunningFrom(root, Environment.ProcessId);
+            int count = running.Count;
+            foreach (var p in running) p.Dispose();
+            if (count != 0) return true;
+        }
+        return false;
+    }
+
+    public static bool WaitUntilClosed(IEnumerable<string> roots, TimeSpan timeout)
+    {
+        var list = roots.ToList();
+        var watch = Stopwatch.StartNew();
+        while (AnyRunning(list)) {
+            if (watch.Elapsed > timeout) return false;
+            Thread.Sleep(300);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Asks the running launcher to exit normally (ending its programs and proxy). Only a launcher from one of
+    /// these roots is asked; launchers before 0.10.0 ignore the request.
+    /// </summary>
+    public static bool RequestExit(IEnumerable<string> roots, string? pipeName = null)
+    {
+        pipeName ??= $"RegionLauncher.UI.{WindowsIdentity.GetCurrent().User!.Value}.{Process.GetCurrentProcess().SessionId}";
+        try {
+            using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.CurrentUserOnly);
+            client.Connect(1500);
+            byte[] pid = new byte[4];
+            client.ReadExactly(pid);
+            bool ours = false;
+            try {
+                using var process = Process.GetProcessById(BitConverter.ToInt32(pid));
+                ours = process.MainModule?.FileName is { } path && roots.Any(root => path.StartsWith(Path.GetFullPath(root).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase));
+            } catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception or InvalidOperationException) { }
+            client.Write(new byte[] { (byte)(ours ? 2 : 0) });
+            client.Flush();
+            return ours;
+        } catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or InvalidOperationException) { return false; }
+    }
+
+    /// <summary>Ends the launcher first (its sessions then end their programs), then anything left from these roots.</summary>
+    public static void ForceClose(IEnumerable<string> roots)
+    {
+        var list = roots.ToList();
+        foreach (string name in new[] { "RegionLauncher", "RegionSession", "mihomo" }) {
+            foreach (string root in list)
+                foreach (var process in RunningFrom(root, Environment.ProcessId)) {
+                    try { if (process.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase)) { process.Kill(); process.WaitForExit(5000); } }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+                    finally { process.Dispose(); }
+                }
+            if (name == "RegionLauncher") WaitUntilClosedByName(list, "RegionSession", TimeSpan.FromSeconds(3));
+        }
+    }
+
+    static void WaitUntilClosedByName(List<string> roots, string name, TimeSpan timeout)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.Elapsed < timeout) {
+            bool any = false;
+            foreach (string root in roots)
+                foreach (var p in RunningFrom(root, Environment.ProcessId)) { any |= p.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase); p.Dispose(); }
+            if (!any) return;
+            Thread.Sleep(200);
+        }
+    }
+
+    /// <summary>
+    /// Makes sure no launcher (this installation's, or any other running in this session) is running before files are replaced.
+    /// Returns false when the user cancels.
+    /// </summary>
+    public static async Task<bool> CloseRunning(IWin32Window owner, IEnumerable<string> roots, string action)
+    {
+        var all = RunningLauncherRoots();
+        foreach (string root in roots) if (!all.Any(r => SamePath(r, root))) all.Add(root);
+        if (!AnyRunning(all)) return true;
+        if (MessageDialog.Ask(owner, $"Region Launcher 正在运行。继续{action}前需要先退出它，其中运行的程序也会一并结束，请先保存工作。",
+                "退出 Region Launcher", MessageBoxIcon.Question, ("退出并继续", DialogResult.OK), ("取消", DialogResult.Cancel)) != DialogResult.OK) return false;
+        RequestExit(all);
+        if (await Task.Run(() => WaitUntilClosed(all, TimeSpan.FromSeconds(30)))) return true;
+        while (true) {
+            var choice = MessageDialog.Ask(owner,
+                "Region Launcher 没有自动退出（0.10.0 之前的版本不支持由安装程序关闭）。可以在托盘图标上右键选择“退出（结束全部运行）”后点“重试”，或直接强制结束。强制结束会立即关闭其中运行的程序。",
+                "退出 Region Launcher", MessageBoxIcon.Warning, ("重试", DialogResult.Retry), ("强制结束", DialogResult.Abort), ("取消", DialogResult.Cancel));
+            if (choice == DialogResult.Cancel) return false;
+            if (choice == DialogResult.Abort) await Task.Run(() => ForceClose(all));
+            if (await Task.Run(() => WaitUntilClosed(all, TimeSpan.FromSeconds(choice == DialogResult.Abort ? 10 : 3)))) return true;
+        }
+    }
+
+    /// <summary>Unattended variant: ask to exit, then optionally force.</summary>
+    public static bool CloseRunningSilently(IEnumerable<string> roots, bool force)
+    {
+        var all = roots.ToList();
+        if (!AnyRunning(all)) return true;
+        RequestExit(all);
+        if (WaitUntilClosed(all, TimeSpan.FromSeconds(30))) return true;
+        if (!force) return false;
+        ForceClose(all);
+        return WaitUntilClosed(all, TimeSpan.FromSeconds(10));
     }
 
     public static bool DesktopRuntimeInstalled()
