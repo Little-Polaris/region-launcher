@@ -60,6 +60,27 @@ sealed class DiagnosticLog : IDisposable
             return reader.ReadToEnd();
         }
     }
+    /// <summary>
+    /// Text written since (file, position); after a rotation or on the first call, the last 128 KiB of the current part.
+    /// Reads under the writer lock, so the result always ends at a complete line.
+    /// </summary>
+    internal (string Text, string? File, long Position) ReadFrom(string? fileName, long position)
+    {
+        lock (sync) {
+            if (writer?.BaseStream is not FileStream current) return ("", fileName, position);
+            using var file = new FileStream(current.Name, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            long end = file.Length;
+            bool fresh = fileName != current.Name || position > end;
+            long start = fresh ? Math.Max(0, end - 128 * 1024) : position;
+            file.Position = start;
+            byte[] bytes = new byte[(int)(end - start)]; int count = 0;
+            while (count < bytes.Length) { int read = file.Read(bytes, count, bytes.Length - count); if (read == 0) break; count += read; }
+            string text = Encoding.UTF8.GetString(bytes, 0, count);
+            if (fresh && start > 0 && text.IndexOf('\n') is int newline and >= 0) text = text[(newline + 1)..];
+            return (text, current.Name, start + count);
+        }
+    }
+
     public void CaptureNetworkLog(string label, string? path = null)
     {
         try {

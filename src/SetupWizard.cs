@@ -133,7 +133,7 @@ sealed class SetupWizard : Form
     void Finish(FlowLayoutPanel content)
     {
         content.Controls.Add(Heading("设置完成"));
-        content.Controls.Add(Body("几个常用操作：\n\n•  点击程序卡片：在独立环境中启动该程序\n•  检测并修复：检查节点连通性，并在断开时自动恢复\n•  切换节点：运行中更换出口节点\n•  右侧“正在运行”：查看、切换或关闭已启动的程序", HomeTheme.Text));
+        content.Controls.Add(Body("几个常用操作：\n\n•  点击程序卡片：在独立环境中启动该程序\n•  网络检测：检查节点连通性，并在断开时自动恢复\n•  切换节点：运行中更换出口节点\n•  右侧“正在运行”：查看、切换或关闭已启动的程序", HomeTheme.Text));
         var auto = new AntdUI.Checkbox { Text = "启动时自动检查更新（访问 GitHub）", Checked = host.AutoUpdate(), AutoSizeMode = AntdUI.TAutoSize.Auto, Margin = new(0, 6, 0, 0) };
         auto.CheckedChanged += (_, _) => host.SetAutoUpdate(auto.Checked);
         content.Controls.Add(auto);

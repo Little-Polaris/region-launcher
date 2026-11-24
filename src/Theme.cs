@@ -293,7 +293,7 @@ sealed class MessageDialog : Form
             MessageBoxIcon.Question => ("QuestionCircleFilled", HomeTheme.Accent),
             MessageBoxIcon.Information => ("InfoCircleFilled", HomeTheme.Accent),
             _ => ("", HomeTheme.Accent) };
-        if (title.StartsWith("检测并修复：") && icon == MessageBoxIcon.Information) (svg, color) = ("CheckCircleFilled", HomeTheme.Success);
+        if (title.StartsWith("网络检测：") && icon == MessageBoxIcon.Information) (svg, color) = ("CheckCircleFilled", HomeTheme.Success);
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new(24, 22, 24, 18) };
         body.ColumnStyles.Add(new(SizeType.AutoSize)); body.ColumnStyles.Add(new(SizeType.Percent, 100));
         if (svg != "") body.Controls.Add(new PictureBox { Image = HomeTheme.Icon(svg, LogicalToDeviceUnits(24), color),

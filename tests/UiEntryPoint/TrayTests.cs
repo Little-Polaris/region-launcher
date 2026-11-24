@@ -80,7 +80,7 @@ static class TrayTests {
             Application.DoEvents(); Thread.Sleep(150);
             Check(!session.HasExited && !root.HasExited && !child.HasExited && !outside.HasExited,
                 "Unexpected proxy exit terminated running applications");
-            Check(((ToolStripMenuItem)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Text == "检测并修复", "Recovery button missing");
+            Check(((ToolStripMenuItem)type.GetField("checkProxy", Hidden)!.GetValue(form)!).Text == "网络检测", "Recovery button missing");
             Console.WriteLine("PASS: unexpected proxy exit preserves existing root/child job and outside process");
             type.GetField("preparing", Hidden)!.SetValue(form, true);
             form.Close(); Application.DoEvents();

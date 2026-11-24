@@ -42,7 +42,7 @@ static class LaunchFailureTests
         timer.Tick += (_, _) => EnumThreadWindows(GetCurrentThreadId(), (window, _) => {
             var title = new StringBuilder(128); GetWindowText(window, title, title.Capacity);
             if (title.ToString() == "启动失败") { dialogs++; PostMessage(window, 0x0010, 0, 0); }
-            if (title.ToString().StartsWith("检测并修复：")) { checkDialogs.Add(title.ToString()); PostMessage(window, 0x0010, 0, 0); }
+            if (title.ToString().StartsWith("网络检测：")) { checkDialogs.Add(title.ToString()); PostMessage(window, 0x0010, 0, 0); }
             return true;
         }, 0);
         timer.Start();
@@ -104,7 +104,7 @@ static class LaunchFailureTests
             notifyCheck.Invoke(form, new object[] { mode == 1, "实际联网及环境出口校验通过。", mode == 2 ? "测试节点不可用" : null });
             Check(form.Visible && form.WindowState != FormWindowState.Minimized, "Check result did not restore launcher");
         }
-        Check(checkDialogs.SequenceEqual(new[] { "检测并修复：连接正常", "检测并修复：连接已恢复", "检测并修复：未能恢复连接" }), "Missing or duplicate check result dialogs");
+        Check(checkDialogs.SequenceEqual(new[] { "网络检测：连接正常", "网络检测：连接已恢复", "网络检测：未能恢复连接" }), "Missing or duplicate check result dialogs");
         type.GetField("exiting", Hidden)!.SetValue(form, true);
         notifyCheck.Invoke(form, new object[] { false, "", "退出期间" });
         Check(checkDialogs.Count == 3, "Exit generated a check result dialog");

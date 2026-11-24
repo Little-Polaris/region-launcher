@@ -53,7 +53,7 @@ sealed class Launcher : Form
     readonly ContextMenuStrip actions = new();
     readonly ToolStripMenuItem configureProxy = new("独立代理配置…");
     readonly ToolStripMenuItem switchProxy = new("切换节点…");
-    readonly ToolStripMenuItem checkProxy = new("检测并修复");
+    readonly ToolStripMenuItem checkProxy = new("网络检测");
     readonly ToolStripMenuItem linkBrowser = new("授权浏览器…");
     readonly ToolStripMenuItem probe = new("添加环境测试程序");
     bool preparing;
@@ -99,7 +99,7 @@ sealed class Launcher : Form
         var title = new Label { Text = "Region Launcher", AutoSize = true, Anchor = AnchorStyles.Left, TextAlign = ContentAlignment.MiddleLeft,
             Font = new(Font.FontFamily, 17, FontStyle.Bold), ForeColor = HomeTheme.Text, Margin = Padding.Empty };
         var quick = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
-        var check = HomeTheme.Action("检测并修复", AntdUI.TTypeMini.Primary, "SafetyCertificateOutlined"); check.Click += (_, _) => checkProxy.PerformClick();
+        var check = HomeTheme.Action("网络检测", AntdUI.TTypeMini.Primary, "SafetyCertificateOutlined"); check.Click += (_, _) => checkProxy.PerformClick();
         var node = HomeTheme.Action("切换节点", AntdUI.TTypeMini.Default, "SwapOutlined"); node.Click += (_, _) => switchProxy.PerformClick();
         checkProxy.EnabledChanged += (_, _) => { check.Enabled = checkProxy.Enabled; check.Loading = !checkProxy.Enabled && preparing; };
         switchProxy.EnabledChanged += (_, _) => node.Enabled = switchProxy.Enabled;
@@ -187,7 +187,7 @@ sealed class Launcher : Form
             shutdown.Cancel();
             StopSession();
         };
-        dedicatedProxy.UnexpectedExit += () => Append("独立代理内核已退出；已启动的软件和网络隔离保留。点击“检测并修复”或启动新程序时将重新连接代理。");
+        dedicatedProxy.UnexpectedExit += () => Append("独立代理内核已退出；已启动的软件和网络隔离保留。点击“网络检测”或启动新程序时将重新连接代理。");
         Directory.CreateDirectory(data);
         Profile legacy = new();
         try { legacy = JsonSerializer.Deserialize<Profile>(File.ReadAllText(Path.Combine(data, "profile.json"))) ?? new(); }
@@ -233,21 +233,54 @@ sealed class Launcher : Form
             BorderStyle = BorderStyle.None, BackColor = Color.FromArgb(250, 251, 252), ForeColor = HomeTheme.Text, Font = new("Consolas", 9.5f) };
         var frame = new LogFrame { Dock = DockStyle.Fill };
         frame.Controls.Add(log);
-        var refresh = HomeTheme.Action("刷新", AntdUI.TTypeMini.Default, "ReloadOutlined");
         var close = HomeTheme.Action("关闭", AntdUI.TTypeMini.Primary); close.DialogResult = DialogResult.Cancel;
         dialog.CancelButton = close;
-        void LoadTail()
+        // Follow the log live: new lines are appended every half second. While the view is at the bottom it stays there;
+        // after scrolling up to read, the position is kept until the user scrolls back down.
+        string? file = null; long position = 0;
+        void Follow()
         {
-            try { log.Text = diagnostics?.ReadTail() ?? "当前运行日志不可用。"; }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log.Text = "读取日志失败：" + ex.Message; }
-            log.SelectionStart = log.TextLength; log.ScrollToCaret();
+            if (diagnostics == null) { if (log.TextLength == 0) log.Text = "当前运行日志不可用。"; return; }
+            (string Text, string? File, long Position) next;
+            try { next = diagnostics.ReadFrom(file, position); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { if (log.TextLength == 0) log.Text = "读取日志失败：" + ex.Message; return; }
+            bool rotated = next.File != file;
+            file = next.File; position = next.Position;
+            if (next.Text.Length == 0 && !rotated) return;
+            string text = ReadableLog(next.Text);
+            bool atBottom = rotated || LogAtBottom(log);
+            int firstLine = (int)SendMessageW(log.Handle, 0x00CE, 0, 0); // EM_GETFIRSTVISIBLELINE
+            if (rotated) log.Text = text; else log.AppendText(text);
+            // Keep memory bounded on long sessions.
+            if (log.TextLength > 1_000_000) { log.Select(0, log.GetFirstCharIndexFromLine(log.GetLineFromCharIndex(log.TextLength - 600_000))); log.SelectedText = ""; atBottom = true; }
+            if (atBottom) { log.Select(log.TextLength, 0); SendMessageW(log.Handle, 0x0115, 7, 0); SendMessageW(log.Handle, 0x0114, 6, 0); } // SB_BOTTOM, then back to the left edge
+            else SendMessageW(log.Handle, 0x00B6, 0, firstLine - (int)SendMessageW(log.Handle, 0x00CE, 0, 0)); // EM_LINESCROLL back
         }
-        refresh.Click += (_, _) => LoadTail();
+        var timer = new System.Windows.Forms.Timer { Interval = 500 };
+        timer.Tick += (_, _) => Follow();
+        dialog.Shown += (_, _) => { log.Select(log.TextLength, 0); SendMessageW(log.Handle, 0x0115, 7, 0); timer.Start(); };
+        dialog.FormClosed += (_, _) => timer.Dispose();
         var folder = HomeTheme.Action("打开日志文件夹", AntdUI.TTypeMini.Default, "FolderOpenOutlined"); folder.Click += (_, _) => OpenLogs();
-        var buttons = HomeTheme.Footer(close, folder, refresh); buttons.Dock = DockStyle.Bottom;
-        dialog.Controls.Add(frame); dialog.Controls.Add(buttons); LoadTail();
+        var buttons = HomeTheme.Footer(close, folder); buttons.Dock = DockStyle.Bottom;
+        dialog.Controls.Add(frame); dialog.Controls.Add(buttons); Follow();
         return dialog;
     }
+
+    // Some programs log text they decoded wrongly themselves (for example UTF-16 tool output read as UTF-8, which
+    // leaves JSON-escaped NULs between the letters). Drop those escapes in the viewer; the file keeps the original.
+    static string ReadableLog(string text) => text.Replace("\\u0000", "").Replace("\0", "");
+
+    static bool LogAtBottom(TextBox box)
+    {
+        var info = new ScrollInfo { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<ScrollInfo>(), Mask = 0x17 }; // SIF_ALL
+        if (!GetScrollInfo(box.Handle, 1, ref info)) return true; // no vertical scroll bar yet
+        return info.Page == 0 || info.Pos + (int)info.Page >= info.Max;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    struct ScrollInfo { public uint Size, Mask; public int Min, Max; public uint Page; public int Pos, TrackPos; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetScrollInfo(IntPtr window, int bar, ref ScrollInfo info);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")] static extern IntPtr SendMessageW(IntPtr window, int message, int wParam, int lParam);
     void OpenLogs()
     {
         try {
@@ -499,7 +532,7 @@ sealed class Launcher : Form
         bool failover = dedicatedProxy.UsesFailover;
         Append(failover
             ? "开始检测：Mihomo 负责节点探活与切换。启动器检查本地代理和环境内实际联网。"
-            : "开始检测并修复：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。");
+            : "开始网络检测：固定出口规则 → 代理实际联网及必要时重连 → 环境内实际联网。");
         Append($"检测通道：启动器独立代理 127.0.0.1:{dedicatedProxy.Port}，专用 DNS {dedicatedProxy.DnsAddress}:53。");
         bool exitedCore = dedicatedProxy.HasExitedCore;
         var throughProxy = await proxyRecovery.CheckAsync(shutdown.Token, reconnectOnProbeFailure: !failover);
@@ -526,7 +559,7 @@ sealed class Launcher : Form
     void NotifyCheckResult(bool recovered, string detail, string? error)
     {
         if (exiting || shutdown.IsCancellationRequested || IsDisposed) return;
-        string title = error != null ? "检测并修复：未能恢复连接" : recovered ? "检测并修复：连接已恢复" : "检测并修复：连接正常";
+        string title = error != null ? "网络检测：未能恢复连接" : recovered ? "网络检测：连接已恢复" : "网络检测：连接正常";
         string message = error != null ? "本次检测或修复未通过。\n\n" + error + "\n\n请从右上角菜单打开日志查看详情。" : detail;
         Append(title);
         RestoreWindow();

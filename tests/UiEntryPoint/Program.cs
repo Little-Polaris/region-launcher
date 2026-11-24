@@ -109,7 +109,26 @@ var ui = new Thread(() =>
         if (!tail.Contains("启动器版本 ") || !tail.Contains("请在右上角菜单选择")) throw new Exception("Run log does not expose the current diagnostic file");
         using (var log = (Form)form.GetType().GetMethod("CreateRunLog", flags)!.Invoke(form, null)!) {
             static IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>().SelectMany(child => Descendants(child).Prepend(child));
-            if (!Descendants(log).OfType<TextBox>().Single().Text.Contains("启动器版本 ")) throw new Exception("Log dialog is not wired to diagnostics");
+            var box = Descendants(log).OfType<TextBox>().Single();
+            if (!box.Text.Contains("启动器版本 ")) throw new Exception("Log dialog is not wired to diagnostics");
+            if (Descendants(log).Any(c => c.Text == "刷新")) throw new Exception("Run log still has a refresh button");
+            log.StartPosition = FormStartPosition.Manual; log.Location = new(-32000, -32000); log.ShowInTaskbar = false; log.Show();
+            var append = form.GetType().GetMethod("Append", flags)!;
+            void Pump(int ms) { var until = DateTime.Now.AddMilliseconds(ms); while (DateTime.Now < until) { Application.DoEvents(); Thread.Sleep(20); } }
+            Pump(300);
+            for (int i = 0; i < 300; i++) append.Invoke(form, new object[] { $"实时日志行 {i}" });
+            append.Invoke(form, new object[] { @"乱码样例 L\u0000i\u0000n\u0000u\u0000x" });
+            Pump(1500);
+            if (!box.Text.Contains("实时日志行 299") || !box.Text.Contains("乱码样例 Linux")) throw new Exception("Run log does not follow new lines live");
+            int LastVisible() => box.GetLineFromCharIndex(box.GetCharIndexFromPosition(new System.Drawing.Point(2, box.ClientSize.Height - 4)));
+            if (LastVisible() < box.GetLineFromCharIndex(box.TextLength) - 2) throw new Exception("Run log does not stay at the bottom");
+            box.SelectionStart = 0; box.ScrollToCaret(); Pump(200);
+            int first = box.GetLineFromCharIndex(box.GetCharIndexFromPosition(new System.Drawing.Point(2, 2)));
+            append.Invoke(form, new object[] { "向上翻看时的新行" });
+            Pump(1500);
+            int after = box.GetLineFromCharIndex(box.GetCharIndexFromPosition(new System.Drawing.Point(2, 2)));
+            if (!box.Text.Contains("向上翻看时的新行") || after != first) throw new Exception($"Run log jumped while reading earlier lines ({first} -> {after})");
+            log.Close();
         }
         var editorType = assembly.GetType("ApplicationEditor")!;
         foreach (float fontSize in new[] { 10f, 15f, 20f }) {
