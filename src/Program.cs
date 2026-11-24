@@ -143,8 +143,12 @@ sealed class Launcher : Form
         HomeTheme.Apply(actions); HomeTheme.Apply(trayMenu);
         tiles.DragEnter += (_, e) => e.Effect = tiles.Enabled && DroppedExecutable(e) != null ? DragDropEffects.Copy : DragDropEffects.None;
         tiles.DragDrop += (_, e) => {
-            if (tiles.Enabled && DroppedExecutable(e) is string file)
-                EditSoftware(new LaunchApplication { Name = Path.GetFileNameWithoutExtension(file), Application = file, Environment = DefaultEnvironment }, adding: true);
+            if (!tiles.Enabled || DroppedExecutable(e) is not string file) return;
+            try { EditSoftware(ApplicationLibrary.ImportTarget(file, DefaultEnvironment), adding: true); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or
+                System.Runtime.InteropServices.COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) {
+                MessageDialog.Show(this, ex.Message, "无法导入程序", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         };
         checkProxy.Click += async (_, _) => await TrackOperation(async () => {
             if (!BeginPreparation(out long operation)) return;
@@ -218,7 +222,7 @@ sealed class Launcher : Form
 
     internal static string? DroppedExecutable(DragEventArgs e) =>
         e.Data?.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files &&
-        Path.IsPathFullyQualified(files[0]) && ApplicationLibrary.SupportsTarget(files[0]) ? files[0] : null;
+        Path.IsPathFullyQualified(files[0]) && (ApplicationLibrary.SupportsTarget(files[0]) || ApplicationLibrary.IsShortcut(files[0])) ? files[0] : null;
 
     void ShowRunLog()
     {
@@ -576,7 +580,7 @@ sealed class Launcher : Form
         {
             ApplicationLibrary.ValidateEntry(selected);
             string target = ApplicationLibrary.ResolvePath(selected.Application);
-            var (app, appArgs, workingDirectory) = ApplicationLibrary.PrepareTarget(target, selected.Arguments);
+            var (app, appArgs, workingDirectory) = ApplicationLibrary.PrepareTarget(target, selected.Arguments, selected.WorkingDirectory);
             if (applicationList is { } list && list.SelectedId != selected.Id) {
                 var updated = list with { SelectedId = selected.Id };
                 try { library.Save(updated); applicationList = updated; }

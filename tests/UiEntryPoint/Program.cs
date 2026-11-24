@@ -102,6 +102,8 @@ var ui = new Thread(() =>
         object Drop(params string[] paths) => drag.Invoke(null, new object[] {
             new DragEventArgs(new DataObject(DataFormats.FileDrop, paths), 0, 0, 0, DragDropEffects.Copy, DragDropEffects.None) });
         if (!Equals(Drop(Environment.ProcessPath!), Environment.ProcessPath) || Drop("relative.exe") != null ||
+            !Equals(Drop(Path.ChangeExtension(Environment.ProcessPath!, ".lnk")), Path.ChangeExtension(Environment.ProcessPath!, ".lnk")) ||
+            Drop(Path.ChangeExtension(Environment.ProcessPath!, ".url")) != null ||
             Drop(Path.ChangeExtension(Environment.ProcessPath!, ".txt")) != null || Drop(Environment.ProcessPath!, Environment.ProcessPath!) != null)
             throw new Exception("Dropped file validation failed");
         var diagnostics = Field<object>(form, "diagnostics");

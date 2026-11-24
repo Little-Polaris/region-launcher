@@ -118,4 +118,30 @@ if (args.Length == 2) {
     }
 }
 LinkBrowserTests.Run();
+string shortcut = Path.Combine(folder, "中文 快捷方式.LNK");
+string targetFile = Path.Combine(folder, "示例 程序.exe");
+string workingFolder = Path.Combine(folder, "专用 工作目录");
+File.WriteAllBytes(targetFile, []);
+Directory.CreateDirectory(workingFolder);
+dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+try {
+    dynamic link = shell.CreateShortcut(shortcut);
+    try {
+        link.TargetPath = targetFile;
+        link.Arguments = arguments;
+        link.WorkingDirectory = workingFolder;
+        link.Save();
+    } finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link); }
+} finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell); }
+var imported = ApplicationLibrary.ImportTarget(shortcut, japan);
+store.Save(new ApplicationList { Applications = [imported] });
+if (imported.Name != "中文 快捷方式" || imported.Application != targetFile || imported.Arguments != arguments ||
+    imported.WorkingDirectory != workingFolder || imported.Environment != japan || store.Load("", "").Applications.Single() != imported ||
+    ApplicationLibrary.PrepareTarget(imported.Application, imported.Arguments, imported.WorkingDirectory) != (targetFile, arguments, workingFolder) ||
+    ApplicationLibrary.PrepareTarget(targetFile, arguments).WorkingDirectory != folder)
+    throw new Exception("Shortcut metadata or working directory was lost");
+File.Delete(targetFile);
+try { ApplicationLibrary.ImportTarget(shortcut, japan); throw new Exception("Broken shortcut was accepted"); }
+catch (FileNotFoundException) { }
+Console.WriteLine("PASS: Windows shortcut imports and preserves Unicode paths, quoted arguments and a custom working directory; missing targets are rejected");
 Console.WriteLine("PASS: legacy migration, Unicode/quoted arguments, two entries for one executable, edit/delete/reopen/selection, invalid save preservation, malformed file preservation, relative/environment paths");

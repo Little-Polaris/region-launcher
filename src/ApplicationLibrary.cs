@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
@@ -7,6 +8,7 @@ sealed record LaunchApplication
     public string Name { get; init; } = "";
     public string Application { get; init; } = "";
     public string Arguments { get; init; } = "";
+    public string? WorkingDirectory { get; init; }
     public LaunchEnvironment? Environment { get; init; }
     public override string ToString() => Name;
 }
@@ -61,12 +63,39 @@ sealed class ApplicationLibrary(string path)
     public static bool SupportsTarget(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".exe" or ".cmd" or ".bat" or ".ps1" or ".vbs" or ".sh";
 
-    public static (string Executable, string Arguments, string WorkingDirectory) PrepareTarget(string path, string arguments)
+    internal static bool IsShortcut(string path) => Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+
+    internal static LaunchApplication ImportTarget(string path, LaunchEnvironment environment)
+    {
+        var entry = new LaunchApplication { Name = Path.GetFileNameWithoutExtension(path), Application = path, Environment = environment };
+        if (!IsShortcut(path)) return entry;
+        if (!File.Exists(path)) throw new FileNotFoundException("找不到此快捷方式。");
+
+        var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new IOException("Windows 快捷方式组件不可用。");
+        dynamic shell = Activator.CreateInstance(type)!;
+        try {
+            dynamic link = shell.CreateShortcut(path);
+            try {
+                string target = Environment.ExpandEnvironmentVariables((string)link.TargetPath);
+                if (!Path.IsPathFullyQualified(target) || !SupportsTarget(target))
+                    throw new InvalidDataException("此快捷方式没有指向可直接启动的程序或脚本。");
+                if (!File.Exists(ResolvePath(target))) throw new FileNotFoundException("快捷方式指向的程序或脚本不存在。");
+                string directory = (string)link.WorkingDirectory;
+                entry = entry with { Application = target, Arguments = (string)link.Arguments,
+                    WorkingDirectory = string.IsNullOrWhiteSpace(directory) ? null : Environment.ExpandEnvironmentVariables(directory) };
+                ValidateEntry(entry);
+                return entry;
+            } finally { Marshal.FinalReleaseComObject(link); }
+        } finally { Marshal.FinalReleaseComObject(shell); }
+    }
+
+    public static (string Executable, string Arguments, string WorkingDirectory) PrepareTarget(string path, string arguments, string? workingDirectory = null)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("程序或脚本不存在，请重新选择路径。");
         if (path.IndexOfAny(['"', '\r', '\n', '\0']) >= 0 || arguments.IndexOfAny(['\r', '\n', '\0']) >= 0)
             throw new InvalidDataException("启动配置包含无法传递的字符。");
-        string folder = Path.GetDirectoryName(path)!;
+        string folder = string.IsNullOrEmpty(workingDirectory) ? Path.GetDirectoryName(path)! : workingDirectory;
+        if (!Directory.Exists(folder)) throw new DirectoryNotFoundException("程序的工作目录不存在。");
         string system = Environment.SystemDirectory;
         string tail = arguments.Length == 0 ? "" : " " + arguments;
         var (host, command) = Path.GetExtension(path).ToLowerInvariant() switch {
@@ -114,6 +143,9 @@ sealed class ApplicationLibrary(string path)
             throw new InvalidDataException("软件需要名称、程序路径和有效的启动参数字段。");
         foreach (string text in new[] { entry.Id, entry.Name, entry.Application, entry.Arguments })
             if (text.IndexOfAny(['\r', '\n', '\0']) >= 0) throw new InvalidDataException("软件配置不能包含换行符或空字符。");
+        if (!string.IsNullOrEmpty(entry.WorkingDirectory) &&
+            (!Path.IsPathFullyQualified(entry.WorkingDirectory) || entry.WorkingDirectory.IndexOfAny(['"', '\r', '\n', '\0']) >= 0))
+            throw new InvalidDataException("程序的工作目录必须是有效的绝对路径。");
         if (!SupportsTarget(NormalizePath(entry.Application)))
             throw new InvalidDataException("请选择 .exe、.cmd、.bat、.ps1、.vbs 或 .sh 文件。");
     }

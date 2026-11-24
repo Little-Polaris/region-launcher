@@ -63,7 +63,9 @@ sealed class ApplicationEditor : Form
         name.Text = entry?.Name ?? ""; executable.Text = entry?.Application ?? ""; arguments.Text = entry?.Arguments ?? "";
         save.Click += (_, _) => {
             try {
-                var value = new LaunchApplication { Id = id, Name = name.Text.Trim(), Application = executable.Text.Trim(), Arguments = arguments.Text,
+                string target = executable.Text.Trim();
+                var value = new LaunchApplication { Id = id, Name = name.Text.Trim(), Application = target, Arguments = arguments.Text,
+                    WorkingDirectory = string.Equals(entry?.Application, target, StringComparison.OrdinalIgnoreCase) ? entry?.WorkingDirectory : null,
                     Environment = new LaunchEnvironment { GeoId = ((RegionOption)country.Value!).GeoId, Locale = ((LanguageOption)language.Value!).Name,
                         TimeZone = ((TimeZoneInfo)timeZone.Value!).Id, AutoDst = dst.Checked } };
                 ApplicationLibrary.ValidateEntry(value);
