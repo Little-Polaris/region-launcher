@@ -166,7 +166,7 @@ sealed class DedicatedProxy : IDisposable
             ports = requestedPorts;
             fingerprint = hash;
             output = Task.WhenAll(ReadOutput(candidate.StandardOutput.BaseStream), ReadOutput(candidate.StandardError.BaseStream));
-            log($"独立代理内核已启动，PID={candidate.Id}，SOCKS5=127.0.0.1:{Port}，DNS={DnsAddress}:53，规则=MATCH,RegionExit");
+            log($"独立代理内核已启动，PID={candidate.Id}，SOCKS5=127.0.0.1:{Port}，DNS={DnsAddress}:53，规则={string.Join(" → ", runtime["rules"]!.AsArray())}");
             using var readiness = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             readiness.CancelAfter(TimeSpan.FromSeconds(6));
             var readyToken = readiness.Token;

@@ -64,9 +64,21 @@ static class SubscriptionTests
         await ProxyConfiguration.ValidateAndSave(runtime, Path.Combine(folder, "failover-runtime.json"), engine, true);
         using (var exit = new ProxyRuntimeExit(runtime, folder))
         {
+            string providerFile = Path.Combine(folder, runtime["proxy-providers"]!["RegionActive"]!["path"]!.GetValue<string>());
+            foreach (string type in new[] { "trojan", "anytls" })
+            {
+                foreach (bool? requested in new bool?[] { null, false, true })
+                {
+                    var node = new JsonObject { ["type"] = type };
+                    if (requested.HasValue) node["udp"] = requested.Value;
+                    exit.WriteNode(node);
+                    var actual = JsonNode.Parse(File.ReadAllText(providerFile))!["proxies"]![0]!;
+                    Assert(actual["udp"]!.GetValue<bool>() == (requested ?? true), "Unexpected UDP policy for " + type);
+                }
+            }
             exit.WriteNode(null);
             await ProxyConfiguration.ValidateAndSave(runtime, Path.Combine(folder, "switchable-auto.json"), engine, false);
-            Assert(runtime["rules"]![0]!.GetValue<string>() == "MATCH,RegionExit", "Hot switch changed the protected route");
+            Assert(JsonNode.DeepEquals(runtime["rules"], new JsonArray("MATCH,RegionExit", "MATCH,REJECT")), "Hot switch changed the protected route");
             Assert(runtime["dns"]!["nameserver"]!.AsArray().Count == resolvers.Length, "Hot switch removed DNS redundancy");
         }
         var fixedRuntime = (JsonObject)protectedConfig.DeepClone();

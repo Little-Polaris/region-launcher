@@ -35,6 +35,16 @@ static class RuntimeExitTests
                     ["name"] = "RegionExit", ["type"] = "fallback", ["proxies"] = new JsonArray("First", "Second")
                 });
             }
+            using var target = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+            using var probe = new UdpClient(AddressFamily.InterNetwork);
+            using var portReservation = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+            var tunnel = (IPEndPoint)portReservation.Client.LocalEndPoint!;
+            portReservation.Close();
+            rules["tunnels"] = new JsonArray(new JsonObject
+            {
+                ["network"] = new JsonArray("udp"), ["address"] = tunnel.ToString(),
+                ["target"] = target.Client.LocalEndPoint!.ToString()
+            });
             using var exit = new ProxyRuntimeExit(rules, folder);
             exit.WriteNode(null);
             string file = Path.Combine(folder, $"switch-runtime-{automatic}.json");
@@ -49,7 +59,7 @@ static class RuntimeExitTests
             async Task Expect(string body)
             {
                 string answer = await throughProxy.GetStringAsync("http://fixture.invalid/", timeout.Token);
-                if (answer != body || process.HasExited) throw new Exception("Unexpected route or proxy process exit");
+                if (answer != body || process.HasExited) throw new Exception($"Expected {body}, got {answer.Length} bytes: {answer[..Math.Min(answer.Length, 160)]}, automatic={automatic}, exited={process.HasExited}");
             }
             try
             {
@@ -64,6 +74,16 @@ static class RuntimeExitTests
                 if (response.StatusCode != HttpStatusCode.Unauthorized) throw new Exception("Controller accepted unauthenticated access");
 
                 await Expect("first");
+                await probe.SendAsync(new byte[] { 42 }, tunnel);
+                using (var wait = new CancellationTokenSource(TimeSpan.FromSeconds(1)))
+                {
+                    try
+                    {
+                        await target.ReceiveAsync(wait.Token);
+                        throw new Exception("UDP escaped through DIRECT");
+                    }
+                    catch (OperationCanceledException) when (wait.IsCancellationRequested) { }
+                }
                 if (!automatic)
                 {
                     first.Online = false;
@@ -91,8 +111,13 @@ static class RuntimeExitTests
             {
                 if (!process.HasExited) process.Kill();
                 await process.WaitForExitAsync();
+                await File.WriteAllTextAsync(Path.Combine(folder, $"switch-{automatic}.log"), await output + await errors);
                 File.Delete(file);
             }
+            string log = await output + await errors;
+            if (!log.Split('\n').Any(line => line.Contains("[UDP]") &&
+                line.Contains(target.Client.LocalEndPoint!.ToString()!) && line.Contains("using REJECT")))
+                throw new Exception("Mihomo did not confirm UDP rejection: " + log);
         }
         Console.WriteLine("PASS: real Mihomo hot switch, in-place reconnect, return to automatic, authenticated localhost API, same core");
     }

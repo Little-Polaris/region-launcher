@@ -21,6 +21,9 @@ sealed class ProxyRuntimeExit : IDisposable
         string file = $"runtime-node-{Environment.ProcessId}-{Guid.NewGuid():N}.json";
         path = Path.Combine(directory, file);
         var nodes = config["proxies"]!.AsArray();
+        // Mihomo skips a route whose selected adapter cannot carry UDP.
+        config["rules"]!.AsArray().Add("MATCH,REJECT");
+        foreach (var node in nodes.OfType<JsonObject>()) EnableSupportedUdp(node);
         defaultNode = (JsonObject)nodes[0]!.DeepClone();
         var groups = config["proxy-groups"] as JsonArray;
         group = groups != null;
@@ -59,10 +62,17 @@ sealed class ProxyRuntimeExit : IDisposable
 
     public bool HasAutomatic => group;
 
+    static void EnableSupportedUdp(JsonObject node)
+    {
+        if (node["type"]?.GetValue<string>() is "trojan" or "anytls" && !node.ContainsKey("udp"))
+            node["udp"] = true;
+    }
+
     public void WriteNode(JsonObject? node)
     {
         // A different document also makes the provider rebuild the current node on reconnect.
         var entry = (JsonObject)(node ?? defaultNode).DeepClone();
+        EnableSupportedUdp(entry);
         entry["name"] = Manual;
         var content = new JsonObject { ["generation"] = Guid.NewGuid().ToString("N"), ["proxies"] = new JsonArray(entry) };
         string temp = path + ".tmp";
