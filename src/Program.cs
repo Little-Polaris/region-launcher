@@ -345,12 +345,25 @@ sealed class Launcher : Form
 
     async Task CheckForUpdates(bool manual)
     {
-        if (checkingUpdate || exiting) return;
-        checkingUpdate = true; checkUpdate.Enabled = false;
+        if (checkingUpdate || exiting || Application.OpenForms.OfType<ProxySettingsDialog>().Any()) return;
+        checkingUpdate = true; UpdateActions();
+        HttpClient? http = null;
         try {
             UpdateInfo? update;
-            try { update = await Updater.CheckAsync(shutdown.Token); }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) {
+            try {
+                int? port = null;
+                if (dedicatedProxy.Configured) {
+                    Append("检查更新：使用启动器的独立代理。");
+                    await dedicatedProxy.EnsureStarted(shutdown.Token);
+                    port = dedicatedProxy.Port;
+                } else Append("检查更新：未配置独立代理，使用系统网络。");
+                shutdown.Token.ThrowIfCancellationRequested();
+                http = Updater.CreateClient(port);
+                update = await Updater.CheckAsync(http, shutdown.Token);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or InvalidDataException or
+                UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException or
+                KeyNotFoundException or InvalidOperationException) {
                 Append("检查更新失败：" + ex.Message);
                 if (manual && !exiting) MessageDialog.Show(this, "无法连接 GitHub 检查更新：" + ex.Message + "\n\n可以稍后重试，或打开发布页查看。", "检查更新", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -373,7 +386,7 @@ sealed class Launcher : Form
             }
             if (MessageDialog.Show(this, $"发现新版本 {update.Version}（当前 {Updater.Current}）。\n\n{notes}\n\n现在更新吗？更新时启动器会退出并结束全部运行中的程序，节点、订阅和程序列表会保留。",
                 "发现新版本", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes) return;
-            using var download = new UpdateDownloadDialog(update);
+            using var download = new UpdateDownloadDialog(update, http);
             var result = download.ShowDialog(this);
             if (result == DialogResult.Abort) {
                 Append("下载更新失败：" + download.Error?.Message);
@@ -384,7 +397,7 @@ sealed class Launcher : Form
             Append($"已下载并校验 {update.SetupName}，退出后开始安装。");
             Updater.StartInstaller(download.Result, root);
             _ = ExitAsync();
-        } finally { checkingUpdate = false; checkUpdate.Enabled = true; }
+        } finally { http?.Dispose(); checkingUpdate = false; UpdateActions(); }
     }
 
     /// <summary>Exit requested from outside (installer, uninstaller): close open dialogs, then the normal tray exit.</summary>
@@ -419,7 +432,8 @@ sealed class Launcher : Form
     {
         if (exiting) { foreach (Control control in Controls) control.Enabled = false; return; }
         tiles.Enabled = probe.Enabled = !preparing && applicationList != null;
-        configureProxy.Enabled = session == null && !preparing;
+        configureProxy.Enabled = session == null && !preparing && !checkingUpdate;
+        checkUpdate.Enabled = !checkingUpdate;
         switchProxy.Enabled = !preparing && dedicatedProxy.Configured;
         linkBrowser.Enabled = session == null && !preparing;
         checkProxy.Enabled = !preparing;

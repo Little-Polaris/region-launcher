@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -28,11 +29,12 @@ sealed class UpdateSettings
 /// <summary>Checks GitHub Releases for a newer version and downloads its verified installer.</summary>
 static class Updater
 {
-    static readonly HttpClient http = CreateClient();
-
-    static HttpClient CreateClient()
+    internal static HttpClient CreateClient(int? proxyPort)
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var client = proxyPort is int port
+            ? new HttpClient(new HttpClientHandler { Proxy = new WebProxy($"socks5://127.0.0.1:{port}") })
+            : new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("RegionLauncher", Current.ToString()));
         return client;
     }
@@ -42,7 +44,7 @@ static class Updater
     public static string ReleasesPage => $"https://github.com/{Installation.Repository}/releases/latest";
 
     /// <summary>Returns the latest release when it is newer than this build, otherwise null.</summary>
-    public static async Task<UpdateInfo?> CheckAsync(CancellationToken cancellationToken)
+    public static async Task<UpdateInfo?> CheckAsync(HttpClient http, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Installation.Repository}/releases/latest");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
@@ -66,7 +68,7 @@ static class Updater
     }
 
     /// <summary>Downloads the installer and verifies it against the release's SHA-256 file. Returns the local path.</summary>
-    public static async Task<string> DownloadAsync(UpdateInfo update, IProgress<double> progress, CancellationToken cancellationToken)
+    public static async Task<string> DownloadAsync(HttpClient http, UpdateInfo update, IProgress<double> progress, CancellationToken cancellationToken)
     {
         if (update.SetupUrl == null || update.SumsUrl == null) throw new IOException("该版本没有提供安装程序或校验文件，请从发布页手动下载。");
         string sums = await http.GetStringAsync(update.SumsUrl, cancellationToken);
@@ -116,7 +118,7 @@ sealed class UpdateDownloadDialog : Form
     public string? Result { get; private set; }
     public Exception? Error { get; private set; }
 
-    public UpdateDownloadDialog(UpdateInfo update)
+    public UpdateDownloadDialog(UpdateInfo update, HttpClient http)
     {
         var body = new Panel { Dock = DockStyle.Fill, Padding = new(22, 18, 22, 8), BackColor = HomeTheme.Surface };
         var heading = new Label { Text = $"正在下载 Region Launcher {update.Version}", Dock = DockStyle.Top, AutoSize = false, Height = 32,
@@ -132,7 +134,7 @@ sealed class UpdateDownloadDialog : Form
         Icon = AppIcon.Load(new Size(32, 32));
         Shown += async (_, _) => {
             var progress = new Progress<double>(value => { bar.Value = (float)value; status.Text = $"已下载 {value:P0}"; });
-            try { Result = await Updater.DownloadAsync(update, progress, cancel.Token); status.Text = "校验通过"; DialogResult = DialogResult.OK; }
+            try { Result = await Updater.DownloadAsync(http, update, progress, cancel.Token); status.Text = "校验通过"; DialogResult = DialogResult.OK; }
             catch (OperationCanceledException) { DialogResult = DialogResult.Cancel; }
             catch (Exception ex) { Error = ex; DialogResult = DialogResult.Abort; }
         };
