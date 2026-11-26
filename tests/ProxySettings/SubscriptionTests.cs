@@ -207,7 +207,24 @@ static class SubscriptionTests
         Assert(!Field<AntdUI.Button>(picker, "apply").Enabled, "Already active node can be selected again");
         pickerSources.SelectedIndex = 1; pickerChoices.SelectedIndex = 1;
         Assert(pickerChoices.Items.Count == 3 && picker.SelectedNode?["name"]?.GetValue<string>() == "US first", "Live switch mixed subscription sources");
-        Console.WriteLine("PASS: filter, choose correct node and restore cached multi-node selection");
+        int runs = 0;
+        CancellationToken probeToken = default;
+        var probe = new TaskCompletionSource();
+        using var opened = new ProxySwitchDialog(configPath, nodes.Nodes[1].Node, (batch, _, token) => {
+            runs++;
+            probeToken = token;
+            Assert(batch.Count > 0, "Empty automatic latency probe");
+            return probe.Task;
+        });
+        opened.StartPosition = FormStartPosition.Manual; opened.Location = new(-32000, -32000); opened.ShowInTaskbar = false;
+        opened.Show(); Application.DoEvents();
+        Assert(runs == 1, "Opening the picker must measure exactly once");
+        Field<ListBox>(opened, "choices").SelectedIndex = 0;
+        Assert(Field<AntdUI.Button>(opened, "apply").Enabled, "Automatic test blocked switching");
+        opened.Close();
+        Assert(probeToken.IsCancellationRequested, "Closing picker did not cancel automatic test");
+        probe.SetResult(); Application.DoEvents();
+        Console.WriteLine("PASS: auto latency on open, immediate selection, cancellation and subscription selection");
     }
 
     sealed class ProbeResults : IProgress<(int Index, int? DelayMs)>

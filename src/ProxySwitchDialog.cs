@@ -59,7 +59,7 @@ sealed class ProxySwitchDialog : Form
         var buttons = HomeTheme.Footer(cancel, apply, import, latency); buttons.Dock = DockStyle.Bottom;
         Controls.Add(layout); Controls.Add(buttons);
         AcceptButton = apply; CancelButton = cancel;
-        choices.SelectedIndexChanged += (_, _) => apply.Enabled = measuring == null && choices.SelectedItem is Choice { IsCurrent: false };
+        choices.SelectedIndexChanged += (_, _) => apply.Enabled = choices.SelectedItem is Choice { IsCurrent: false };
 
         var saved = ProxyConfiguration.ReadNode(File.ReadAllText(configPath), out _);
         bool automatic = ProxyConfiguration.IsFailover(saved);
@@ -114,14 +114,14 @@ sealed class ProxySwitchDialog : Form
         Populate();
 
         FormClosing += (_, _) => measuring?.Cancel();
-        latency.Click += async (_, _) =>
+        async Task MeasureAsync()
         {
             if (measure == null || measuring != null) return;
             var rows = choices.Items.Cast<Choice>().Select((choice, index) => (Choice: choice, Index: index)).Where(row => row.Choice.Node != null).ToArray();
             if (rows.Length == 0) return;
             using var tokenSource = new CancellationTokenSource();
             measuring = tokenSource;
-            latency.Enabled = import.Enabled = sources.Enabled = apply.Enabled = false;
+            latency.Enabled = import.Enabled = sources.Enabled = false;
             latency.Loading = true;
             status.Text = "正在测量当前列表的节点…";
             int keep = choices.SelectedIndex;
@@ -155,7 +155,9 @@ sealed class ProxySwitchDialog : Form
                     apply.Enabled = choices.SelectedItem is Choice { IsCurrent: false };
                 }
             }
-        };
+        }
+        Shown += async (_, _) => await MeasureAsync();
+        latency.Click += async (_, _) => await MeasureAsync();
 
         import.Click += (_, _) =>
         {
