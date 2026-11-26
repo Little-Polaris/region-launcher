@@ -15,9 +15,9 @@ static class TrayActivation
     [DllImport("user32.dll")] static extern bool IsWindowVisible(nint window);
     [DllImport("shell32.dll")] static extern int Shell_NotifyIconGetRect(ref IconId icon, out Rect bounds);
 
-    public enum Result { Invoked, Picker, Missing }
+    public enum Result { Invoked, Missing }
 
-    static nint Overflow()
+    internal static nint Overflow()
     {
         foreach (string cls in new[] { "TopLevelWindowForOverflowXamlIsland", "NotifyIconOverflowWindow" })
         {
@@ -88,27 +88,7 @@ static class TrayActivation
             if (taskbar == 0 || process.HasExited) return Result.Missing;
             var ids = RegisteredIds(process);
             if (TryInvoke(process, taskbar, ids)) return Result.Invoked;
-            nint overflow = Overflow();
-            if (overflow == 0)
-            {
-                var root = AutomationElement.FromHandle(taskbar);
-                var buttons = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, "SystemTrayIcon"));
-                foreach (AutomationElement button in buttons)
-                {
-                    if (button.Current.Name is not ("显示隐藏的图标" or "显示隐藏图标" or "Show hidden icons") ||
-                        !button.TryGetCurrentPattern(InvokePattern.Pattern, out var action)) continue;
-                    ((InvokePattern)action).Invoke();
-                    break;
-                }
-                for (int i = 0; i < 15 && (overflow = Overflow()) == 0; i++) Thread.Sleep(40);
-            }
-            if (overflow == 0) return Result.Missing;
-            for (int i = 0; i < 3; i++)
-            {
-                if (TryInvoke(process, overflow, ids)) return Result.Invoked;
-                Thread.Sleep(80);
-            }
-            return Result.Picker;
+            return TryInvoke(process, Overflow(), ids) ? Result.Invoked : Result.Missing;
         }
         catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or IOException or TimeoutException)
         {

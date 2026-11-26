@@ -235,7 +235,7 @@ sealed class RunningApplications : Panel
                 if (target == null) return;
                 var result = await Task.Run(() => TrayActivation.Open(target));
                 if (!IsDisposed && result == TrayActivation.Result.Missing)
-                    Feedback("未找到此实例的可用窗口或托盘入口。");
+                    Feedback("找不到此实例的托盘图标。");
             }
             finally { activating = false; }
             return;

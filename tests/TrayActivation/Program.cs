@@ -30,7 +30,19 @@ internal static class Program
                 if (!SpinWait.SpinUntil(() => File.Exists(FileFor(i)), 5000)) throw new Exception("Tray fixture did not start");
             }
             Thread.Sleep(500);
+            var initialOverflow = TrayActivation.Overflow();
+            using var current = Process.GetCurrentProcess();
+            if (TrayActivation.Open(current) != TrayActivation.Result.Missing || TrayActivation.Overflow() != initialOverflow)
+                throw new Exception("Missing icon changed the tray state");
+            Console.WriteLine("PASS: missing icon reported without changing tray visibility");
             var result = Task.Run(() => TrayActivation.Open(fixtures[1])).GetAwaiter().GetResult();
+            if (result == TrayActivation.Result.Missing && initialOverflow == 0)
+            {
+                if (TrayActivation.Overflow() != 0 || fixtures.Select((_, i) => FileFor(i) + ".shown").Any(File.Exists))
+                    throw new Exception("An inaccessible icon opened the tray or a window");
+                Console.WriteLine("PASS: hidden same-caption icons left alone");
+                return 0;
+            }
             if (!SpinWait.SpinUntil(() => File.Exists(FileFor(1) + ".shown"), 4000) ||
                 File.Exists(FileFor(0) + ".shown"))
                 throw new Exception($"Expected only selected instance to open: {result}");
