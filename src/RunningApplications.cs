@@ -44,7 +44,8 @@ sealed class RunningApplications : Panel
         });
         menu.Opening += (_, e) => {
             e.Cancel = list.SelectedItem is not Entry;
-            foreground.Enabled = close.Enabled = Window() != IntPtr.Zero;
+            foreground.Enabled = !e.Cancel;
+            close.Enabled = Window() != IntPtr.Zero;
             copy.Enabled = !e.Cancel;
         };
         list.MouseDown += (_, e) => { if (e.Button == MouseButtons.Right) list.SelectedIndex = list.IndexFromPoint(e.Location); };
@@ -220,10 +221,25 @@ sealed class RunningApplications : Panel
             owner == (uint)entry.Process.Id && !entry.Process.HasExited ? window : IntPtr.Zero;
     }
 
-    void ActivateSelected()
+    bool activating;
+    async void ActivateSelected()
     {
         var window = Window();
-        if (window == IntPtr.Zero) { Feedback("这个实例暂时没有可切换的窗口。"); return; }
+        if (window == IntPtr.Zero)
+        {
+            if (activating || list.SelectedItem is not Entry entry || entry.Process.HasExited) return;
+            activating = true;
+            try
+            {
+                using var target = Member(entry.Process.Id, entry.Job, entry.Started);
+                if (target == null) return;
+                var result = await Task.Run(() => TrayActivation.Open(target));
+                if (!IsDisposed && result == TrayActivation.Result.Missing)
+                    Feedback("未找到此实例的可用窗口或托盘入口。");
+            }
+            finally { activating = false; }
+            return;
+        }
         if (IsIconic(window)) ShowWindowAsync(window, 9);
         if (!SetForegroundWindow(window)) Feedback("Windows 未允许将此窗口切到前台。");
     }

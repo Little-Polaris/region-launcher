@@ -6,12 +6,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>RegionLauncher</AssemblyName>
-    <Version>0.13.0</Version>
+    <Version>0.14.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>assets/RegionLauncher.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <EmbeddedResource Include="assets/RegionLauncher.ico" LogicalName="RegionLauncher.AppIcon.ico" />
     <PackageReference Include="AntdUI" Version="2.4.20" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
