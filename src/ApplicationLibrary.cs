@@ -89,6 +89,27 @@ sealed class ApplicationLibrary(string path)
         } finally { Marshal.FinalReleaseComObject(shell); }
     }
 
+    public static bool UsesInteractiveConsole(string target, string arguments)
+    {
+        string name = Path.GetFileName(target).ToLowerInvariant();
+        if (name is not ("pwsh.exe" or "powershell.exe" or "cmd.exe")) return false;
+        foreach (string argument in LinkBrowser.Split(arguments))
+        {
+            string flag = argument.ToLowerInvariant();
+            if (name == "cmd.exe")
+            {
+                if (flag.StartsWith("/k", StringComparison.Ordinal)) return true;
+                if (flag.StartsWith("/c", StringComparison.Ordinal)) return false;
+            }
+            else
+            {
+                if (flag is "-noexit" or "-noe") return true;
+                if (flag is not ("-nologo" or "-nol" or "-noprofile" or "-nop" or "-login" or "-l" or "-interactive" or "-i")) return false;
+            }
+        }
+        return true;
+    }
+
     public static (string Executable, string Arguments, string WorkingDirectory) PrepareTarget(string path, string arguments, string? workingDirectory = null)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("程序或脚本不存在，请重新选择路径。");

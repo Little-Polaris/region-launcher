@@ -202,13 +202,16 @@ static int run(bool localeOnly, bool joining = false, bool inject = true) {
     STARTUPINFOW si = {sizeof(si)}; PROCESS_INFORMATION pi = {};
     HANDLE stdCopies[3] = {};
     DWORD stdKinds[] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
-    for (int i = 0; i < 3; ++i) {
-        HANDLE original = GetStdHandle(stdKinds[i]);
-        if (original && original != INVALID_HANDLE_VALUE)
-            DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &stdCopies[i], 0, TRUE, DUPLICATE_SAME_ACCESS);
+    bool newConsole = get(L"InteractiveConsole") == L"1";
+    if (!newConsole) {
+        for (int i = 0; i < 3; ++i) {
+            HANDLE original = GetStdHandle(stdKinds[i]);
+            if (original && original != INVALID_HANDLE_VALUE)
+                DuplicateHandle(GetCurrentProcess(), original, GetCurrentProcess(), &stdCopies[i], 0, TRUE, DUPLICATE_SAME_ACCESS);
+        }
+        si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = stdCopies[0]; si.hStdOutput = stdCopies[1]; si.hStdError = stdCopies[2];
     }
-    si.dwFlags = STARTF_USESTDHANDLES; si.hStdInput = stdCopies[0]; si.hStdOutput = stdCopies[1]; si.hStdError = stdCopies[2];
-    BOOL created = CreateSuspendedJobProcess(sessionJob, app.c_str(), command.data(), cwd.c_str(), si, &pi);
+    BOOL created = CreateSuspendedJobProcess(sessionJob, app.c_str(), command.data(), cwd.c_str(), si, &pi, newConsole);
     DWORD createError = GetLastError();
     for (HANDLE handle : stdCopies) if (handle) CloseHandle(handle);
     SetLastError(createError);

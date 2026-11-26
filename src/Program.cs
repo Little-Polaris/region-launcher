@@ -616,6 +616,7 @@ sealed class Launcher : Form
             string id = Guid.NewGuid().ToString("N"); if (!join) currentJob = @"Local\RegionLauncher." + id;
             string folder = Path.Combine(data, "sessions", id); Directory.CreateDirectory(folder); string config = Path.Combine(folder, "session.ini");
             string ini = $"[session]\r\nJob={currentJob}\r\nOwnerPid={Environment.ProcessId}\r\nApplication={app}\r\nArguments={appArgs}\r\nWorkingDirectory={workingDirectory}\r\nProxyHost={profile.ProxyHost}\r\nProxyPort={profile.ProxyPort}\r\nLocale={profile.Locale}\r\nRegion={region.Code}\r\nGeo={profile.GeoId}\r\nTimeZone={profile.TimeZone}\r\nAutoDst={(profile.AutoDst ? 1 : 0)}\r\n";
+            if (ApplicationLibrary.UsesInteractiveConsole(target, appArgs)) ini += "InteractiveConsole=1\r\n";
             File.WriteAllText(config, ini, Encoding.Unicode);
             File.AppendAllText(config, $"DnsAddress={dnsAddress}\r\n", Encoding.Unicode);
             var browserPlan = LinkBrowser.Prepare(data, currentJob!, settings, applicationList!);

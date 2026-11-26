@@ -3,6 +3,13 @@ using System.Text.Json;
 string folder = Path.GetFullPath(args[0]); Directory.CreateDirectory(folder);
 string path = Path.Combine(folder, "applications.json");
 if (File.Exists(path)) File.Delete(path);
+foreach (var (target, command, interactive) in new[] {
+    ("pwsh.exe", "", true), ("PowerShell.EXE", "-NoProfile -NoExit", true),
+    ("pwsh.exe", "-Command echo hi", false), ("powershell.exe", "-File task.ps1", false),
+    ("cmd.exe", "/d /k echo ready", true), ("cmd.exe", "/d /s /c echo done", false),
+    ("task.ps1", "", false), ("task.bat", "", false), ("chrome.exe", "", false) })
+    if (ApplicationLibrary.UsesInteractiveConsole(target, command) != interactive)
+        throw new Exception($"Incorrect console mode for {target} {command}");
 var store = new ApplicationLibrary(path);
 const string legacy = "C:\\中文 软件🚀\\browser.exe";
 const string arguments = "--user-data-dir=\"D:\\浏览器资料\\专用 副本\" --profile-directory=Default";
